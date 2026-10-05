@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.vite/
+.vitest/
+.vercel/
+*.tsbuildinfo
+*.log
+.env
+.env.*
+!.env.example
+!.env.mock
+.DS_Store
+/AGENTS.md
+/reference/
