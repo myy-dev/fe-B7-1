@@ -10,6 +10,7 @@ import AdminUsersPage from './pages/AdminUsersPage';
 import AdminUserDetailPage from './pages/AdminUserDetailPage';
 import AdminSessionPage from './pages/AdminSessionPage';
 import AdminLogsPage from './pages/AdminLogsPage';
+import AdminSystemLogsPage from './pages/AdminSystemLogsPage';
 
 export default function App() {
   return (
@@ -20,6 +21,7 @@ export default function App() {
         <Route path="users/:userId" element={<AdminUserDetailPage />} />
         <Route path="sessions/:chatId" element={<AdminSessionPage />} />
         <Route path="logs" element={<AdminLogsPage />} />
+        <Route path="system-logs" element={<AdminSystemLogsPage />} />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
       <Route element={<AppLayout />}>

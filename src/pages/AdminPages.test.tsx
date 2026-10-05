@@ -5,7 +5,13 @@ import { MemoryRouter, useLocation, useNavigate } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
-import type { AdminPage, AdminSession, AdminSessionDetail, AdminUserDetail } from '../lib/admin';
+import type {
+  AdminPage,
+  AdminSession,
+  AdminSessionDetail,
+  AdminUserDetail,
+  SystemLog,
+} from '../lib/admin';
 import type { ChatMessage, ChatSession } from '../lib/chats';
 import { server } from '../mocks/server';
 
@@ -182,7 +188,7 @@ describe('관리자 회원·세션 조회', () => {
   });
 });
 
-describe('관리자 조회 조건', () => {
+describe('관리자 조회 조건과 시스템 로그', () => {
   it('회원·KST 기간 조건을 UTC 요청에 적용하고 페이지를 초기화한다', async () => {
     let query: URLSearchParams | undefined;
     server.use(
@@ -213,12 +219,89 @@ describe('관리자 조회 조건', () => {
     expect(query?.get('user_id')).toBe('2');
   });
 
+  it('잘못된 기간은 요청하지 않고 입력을 유지한다', async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, () => {
+        calls++;
+        return HttpResponse.json({ items: [], total: 0, page: 1, size: 20 });
+      }),
+    );
+    const user = renderPage('/admin/system-logs');
+    await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
+    fireEvent.change(screen.getByLabelText('시작 시각 (KST)'), {
+      target: { value: '2026-10-05T10:00:00' },
+    });
+    fireEvent.change(screen.getByLabelText('종료 시각 (KST)'), {
+      target: { value: '2026-10-04T10:00:00' },
+    });
+    await user.click(screen.getByRole('button', { name: '조회' }));
+    expect(screen.getByRole('alert')).toHaveTextContent('종료 시각은 시작 시각 이후');
+    expect(calls).toBe(1);
+    expect(screen.getByLabelText('시작 시각 (KST)')).toHaveValue('2026-10-05T10:00');
+  });
+
+  it('레벨·이벤트 필터와 페이지 상태를 뒤로·앞으로 복원한다', async () => {
+    const user = renderPage('/admin/system-logs?page=2&size=10');
+    await screen.findByRole('region', { name: '시스템 로그 표' });
+    await user.selectOptions(screen.getByRole('combobox', { name: '레벨' }), 'ERROR');
+    await user.type(screen.getByRole('textbox', { name: '이벤트' }), 'ai_call_failed');
+    await user.click(screen.getByRole('button', { name: '조회' }));
+    const table = await screen.findByRole('region', { name: '시스템 로그 표' });
+    expect(within(table).getAllByText('ERROR')).toHaveLength(7);
+    expect(within(table).queryByText('INFO')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent(
+      'page=1&size=10&level=ERROR&event=ai_call_failed',
+    );
+    await user.click(screen.getByRole('button', { name: '검증용 뒤로' }));
+    await screen.findByRole('region', { name: '시스템 로그 표' });
+    expect(screen.getByRole('combobox', { name: '레벨' })).toHaveValue('');
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('page=2&size=10');
+    await user.click(screen.getByRole('button', { name: '검증용 앞으로' }));
+    await screen.findByRole('region', { name: '시스템 로그 표' });
+    expect(screen.getByRole('combobox', { name: '레벨' })).toHaveValue('ERROR');
+    expect(screen.getByRole('textbox', { name: '이벤트' })).toHaveValue('ai_call_failed');
+  });
+
+  it('직접 접근한 UTC 기간을 KST 입력으로 복원하고 동일 로그 두 건을 표시한다', async () => {
+    renderPage('/admin/system-logs?start=2026-10-05T07:00:00Z&end=2026-10-05T07:00:00Z');
+    const table = await screen.findByRole('region', { name: '시스템 로그 표' });
+    expect(within(table).getAllByText('request_received')).toHaveLength(2);
+    expect(within(table).getAllByText('—')).toHaveLength(4);
+    expect(screen.getByLabelText('시작 시각 (KST)')).toHaveValue('2026-10-05T16:00');
+    expect(screen.getByText('총 2건 · 1 / 1 페이지')).toBeInTheDocument();
+  });
+
+  it('조건에 맞는 결과가 없으면 초기화로 전체 조회를 복원한다', async () => {
+    const user = renderPage('/admin/system-logs?event=no_such_event');
+    await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
+    await user.click(screen.getByRole('button', { name: '초기화' }));
+    await screen.findByRole('region', { name: '시스템 로그 표' });
+    expect(screen.getByRole('textbox', { name: '이벤트' })).toHaveValue('');
+    expect(screen.getByText('총 31건 · 1 / 2 페이지')).toBeInTheDocument();
+  });
+
   it('잘못된 URL의 기간·회원 조건을 표시하고 초기화할 수 있다', async () => {
     const user = renderPage('/admin/logs?user_id=wrong&start=invalid');
     expect(screen.getByRole('alert')).toHaveTextContent('회원 ID는 양의 정수');
     await user.click(screen.getByRole('button', { name: '초기화' }));
     await screen.findByRole('region', { name: '대화 기록 표' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('시스템 로그 네트워크 오류에서 재시도한다', async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, () =>
+        ++calls === 1
+          ? HttpResponse.error()
+          : HttpResponse.json({ items: [], total: 0, page: 1, size: 20 }),
+      ),
+    );
+    const user = renderPage('/admin/system-logs');
+    await screen.findByText('목록을 불러오지 못했어요.');
+    await user.click(screen.getByRole('button', { name: '다시 불러오기' }));
+    await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
   });
 
   it('빈 목록 시나리오를 회원 목록에 적용한다', async () => {
@@ -244,7 +327,15 @@ describe('관리자 MSW API 계약', () => {
     expect(logs.items.every((log) => log.chat_id === secondId)).toBe(true);
   });
 
-  it('회원 대화 기록에 기간 조건을 적용한다', async () => {
+  it('기간·레벨·이벤트로 필터한 뒤 전체 수량과 페이지를 계산한다', async () => {
+    const result = await apiRequest<AdminPage<SystemLog>>(
+      '/api/v1/admin/system-logs?level=ERROR&event=ai_call_failed&start=2026-10-04T12:00:00Z&end=2026-10-05T07:00:00Z&page=2&size=2',
+    );
+    expect(result.total).toBe(5);
+    expect(result.items).toHaveLength(2);
+    expect(
+      result.items.every((log) => log.level === 'ERROR' && log.event === 'ai_call_failed'),
+    ).toBe(true);
     const records = await apiRequest<AdminPage<ChatMessage>>(
       '/api/v1/admin/logs?user_id=1&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
     );
@@ -274,7 +365,12 @@ describe('관리자 MSW API 계약', () => {
   });
 
   it('필수 회원 ID·페이지 범위가 잘못되면 422를 반환한다', async () => {
-    for (const path of ['/sessions', '/users?size=101', '/logs?user_id=wrong']) {
+    for (const path of [
+      '/sessions',
+      '/users?size=101',
+      '/system-logs?page=0',
+      '/logs?user_id=wrong',
+    ]) {
       await expect(apiRequest(`/api/v1/admin${path}`)).rejects.toMatchObject({ status: 422 });
     }
   });

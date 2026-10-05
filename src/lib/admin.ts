@@ -30,6 +30,14 @@ export interface AdminSessionDetail extends AdminSession {
   messages: ChatMessage[];
 }
 
+export interface SystemLog {
+  timestamp: string;
+  level: string;
+  event: string;
+  request_id: string | null;
+  user_id: number | null;
+}
+
 export function positiveInteger(value: string | null | undefined): number | null {
   if (!value || !/^\d+$/.test(value)) return null;
   const number = Number(value);

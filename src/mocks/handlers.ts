@@ -1,7 +1,12 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
-import { dateRangeError, positiveInteger, type AdminUserDetail } from '../lib/admin';
+import {
+  dateRangeError,
+  positiveInteger,
+  type AdminUserDetail,
+  type SystemLog,
+} from '../lib/admin';
 
 const exampleChats: ChatDetail[] = [
   {
@@ -83,6 +88,23 @@ const adminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => (
   created_at: new Date(Date.UTC(2026, 8, 30 - index, 3)).toISOString(),
   last_login_at: index % 2 === 0 ? '2026-10-05T03:00:00Z' : null,
 }));
+
+const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
+  const event = ['request_received', 'ai_call_succeeded', 'ai_call_failed', 'user_login_failed'][
+    index % 4
+  ];
+  const userId = index % 7 === 0 ? null : (index % 2) + 1;
+  return {
+    timestamp: new Date(Date.UTC(2026, 9, 5, 7) - index * 3600000).toISOString(),
+    level:
+      event === 'ai_call_failed' ? 'ERROR' : event === 'user_login_failed' ? 'WARNING' : 'INFO',
+    event,
+    request_id: userId ? exampleChats[userId - 1].messages[0].request_id : null,
+    user_id: userId,
+  };
+});
+// 동일한 시각·내용의 로그도 각각 한 건으로 표시한다.
+adminSystemLogs.splice(1, 0, { ...adminSystemLogs[0] });
 
 function getAdminSessions(store: Map<string, ChatDetail>) {
   return sortSessions([...store.values()]).map((chat) => ({
@@ -225,6 +247,21 @@ export const handlers = [
           b.request_id.localeCompare(a.request_id),
       );
     return adminPage(messages, query.page, query.size);
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, async ({ request }) => {
+    const failure = await adminFailure('system');
+    if (failure) return failure;
+    const query = readAdminQuery(request);
+    if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
+    const rows = adminSystemLogs
+      .filter(
+        (log) =>
+          (!query.level || log.level === query.level) &&
+          (!query.event || log.event === query.event) &&
+          withinPeriod(log.timestamp, query.start, query.end),
+      )
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    return adminPage(rows, query.page, query.size);
   }),
   // 세팅 확인용 예제이며 실제 백엔드 API 계약이 아니다.
   http.get(`${API_BASE_URL}/api/example`, () =>
