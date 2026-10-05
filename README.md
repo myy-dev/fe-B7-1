@@ -1,6 +1,6 @@
-# B7-1 Frontend
+# 꽥꽥이 Frontend
 
-React + TypeScript + Vite 기반 프론트엔드 프로젝트입니다. 기술 선택과 작업 규칙은 [AGENTS.md](./AGENTS.md)를 따릅니다.
+대화하는 오리 친구 꽥꽥이의 React + TypeScript + Vite 기반 프론트엔드입니다. 기술 선택과 작업 규칙은 [AGENTS.md](./AGENTS.md)를 따릅니다.
 
 ## 실행
 
@@ -14,6 +14,8 @@ npm run dev
 ```
 
 개발 서버는 기본적으로 `http://localhost:5173`에서 실행됩니다. `.env.local`의 `VITE_API_BASE_URL`을 백엔드 주소에 맞게 변경합니다. 백엔드에서도 프론트엔드 Origin을 CORS 허용 목록에 등록해야 합니다.
+
+현재 화면은 백엔드 없이 확인할 수 있습니다. `/`는 `/chats`로 이동하며 꽥꽥이 환영 화면을 표시합니다. 그 외 주소는 404 안내와 처음 화면으로 돌아가는 링크를 제공합니다. 노란색 계열의 공통 테마와 반응형 레이아웃이 적용되어 있으며, 회원·채팅·관리자 기능은 후속 작업에서 추가합니다.
 
 ## 기술 스택
 
@@ -92,7 +94,7 @@ MSW 패키지 업데이트 후에는 `npx msw init public --save`로 worker를 �
 
 `src/test/setup.ts`에서 React Testing Library와 MSW를 초기화합니다. 각 테스트 후 화면과 임시 handler를 정리하며, 테스트 중 처리하지 않은 네트워크 요청은 오류로 처리합니다.
 
-초기 테스트는 홈·404 라우팅과 API 성공·HTTP 오류·빈 응답을 검증합니다. 실제 기능 구현 후 로그인, 핵심 기능, API 오류 처리부터 테스트를 추가합니다.
+현재 테스트는 시작 주소 이동·채팅 시작 주소 직접 접근·404 복귀와 API 성공·HTTP 오류·빈 응답을 검증합니다. 실제 기능 구현 후 로그인, 핵심 기능, API 오류 처리부터 테스트를 추가합니다.
 
 `npm run check`로 형식 검사, 코드 검사, 테스트, 빌드를 로컬에서 실행합니다.
 
@@ -103,17 +105,19 @@ MSW 패키지 업데이트 후에는 `npx msw init public --save`로 worker를 �
 3. `VITE_API_BASE_URL`에 실제 HTTPS 백엔드 주소를 설정합니다.
 4. 백엔드 CORS 설정에 배포된 프론트엔드 Origin을 추가합니다.
 
-`vercel.json`의 rewrite는 React Router 경로를 직접 열거나 새로고침할 때도 앱을 표시하도록 설정합니다. 초기 화면과 404 화면은 프로젝트 시작용이며, 실제 서비스 화면은 추후 구현합니다.
+`vercel.json`의 rewrite는 React Router 경로를 직접 열거나 새로고침할 때도 앱을 표시하도록 설정합니다.
 
 ## 폴더 구조
 
 ```text
 src/
+  components/  # 공통 UI와 오리 캐릭터
+  layouts/     # 공통 화면 레이아웃
   pages/       # 페이지 컴포넌트
   lib/         # 공통 API 요청 등
   mocks/       # 브라우저·테스트용 MSW 설정
   test/        # 테스트 공통 설정
-  App.tsx      # 공통 레이아웃과 라우트
+  App.tsx      # 라우트 구성
   main.tsx     # 앱 진입점
-  index.css    # Tailwind·daisyUI 설정
+  index.css    # Tailwind·daisyUI 테마와 기본 스타일
 ```
