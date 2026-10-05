@@ -1,14 +1,27 @@
 import { Navigate, Route, Routes } from 'react-router';
 import AppLayout from './layouts/AppLayout';
+import AdminLayout from './layouts/AdminLayout';
 import AuthLayout from './layouts/AuthLayout';
 import ChatPage from './pages/ChatPage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
 import SignupPage from './pages/SignupPage';
+import AdminUsersPage from './pages/AdminUsersPage';
+import AdminUserDetailPage from './pages/AdminUserDetailPage';
+import AdminSessionPage from './pages/AdminSessionPage';
+import AdminLogsPage from './pages/AdminLogsPage';
 
 export default function App() {
   return (
     <Routes>
+      <Route path="/admin" element={<AdminLayout />}>
+        <Route index element={<Navigate to="users" replace />} />
+        <Route path="users" element={<AdminUsersPage />} />
+        <Route path="users/:userId" element={<AdminUserDetailPage />} />
+        <Route path="sessions/:chatId" element={<AdminSessionPage />} />
+        <Route path="logs" element={<AdminLogsPage />} />
+        <Route path="*" element={<NotFoundPage />} />
+      </Route>
       <Route element={<AppLayout />}>
         <Route path="/" element={<Navigate to="/chats" replace />} />
         <Route path="/chats" element={<ChatPage />} />

@@ -1,0 +1,281 @@
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { http, HttpResponse } from 'msw';
+import { MemoryRouter, useLocation, useNavigate } from 'react-router';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import App from '../App';
+import { API_BASE_URL, apiRequest } from '../lib/api';
+import type { AdminPage, AdminSession, AdminSessionDetail, AdminUserDetail } from '../lib/admin';
+import type { ChatMessage, ChatSession } from '../lib/chats';
+import { server } from '../mocks/server';
+
+const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
+const secondId = '6eb321dc-235c-4e3d-a95e-43f2a601fcd8';
+const emptyId = '7b9e0398-6b3e-4b88-87db-358748803b75';
+
+function HistoryControls() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  return (
+    <>
+      <output aria-label="현재 경로">
+        {location.pathname}
+        {location.search}
+      </output>
+      <button onClick={() => navigate(-1)}>검증용 뒤로</button>
+      <button onClick={() => navigate(1)}>검증용 앞으로</button>
+    </>
+  );
+}
+
+function renderPage(path = '/admin/users') {
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <App />
+      <HistoryControls />
+    </MemoryRouter>,
+  );
+  return userEvent.setup();
+}
+
+afterEach(() => vi.unstubAllEnvs());
+
+describe('관리자 회원·세션 조회', () => {
+  it('관리자 시작 주소에서 회원 목록으로 이동하고 서비스로 돌아간다', async () => {
+    const user = renderPage('/admin');
+    await screen.findByRole('link', { name: '사용자A 회원 상세' });
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/admin/users');
+    expect(screen.getByText('총 24건 · 1 / 2 페이지')).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '서비스로 이동' }));
+    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
+  });
+
+  it('목록의 페이지·크기를 URL에서 읽고 변경과 뒤로 가기를 복원한다', async () => {
+    const user = renderPage('/admin/users?page=2&size=10');
+    await screen.findByRole('link', { name: '사용자 11 회원 상세' });
+    expect(screen.queryByRole('link', { name: '사용자A 회원 상세' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '다음' }));
+    await screen.findByRole('link', { name: '사용자 21 회원 상세' });
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('page=3&size=10');
+    await user.selectOptions(screen.getByRole('combobox', { name: '페이지당' }), '20');
+    await screen.findByRole('link', { name: '사용자A 회원 상세' });
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('page=1&size=20');
+    await user.click(screen.getByRole('button', { name: '검증용 뒤로' }));
+    await screen.findByRole('link', { name: '사용자 21 회원 상세' });
+    expect(screen.getByRole('combobox', { name: '페이지당' })).toHaveValue('10');
+  });
+
+  it('회원 상세에서 회원별 세션과 해당 대화만 조회한다', async () => {
+    const user = renderPage();
+    await user.click(await screen.findByRole('link', { name: '사용자A 회원 상세' }));
+    const sessions = await screen.findByRole('region', { name: '회원 대화 세션 표' });
+    expect(within(sessions).getByText(firstId)).toBeInTheDocument();
+    expect(within(sessions).queryByText(secondId)).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '오늘 하루가 조금 지쳤어. 대화 보기' }));
+    const chat = await screen.findByRole('list', { name: '대화 기록' });
+    expect(within(chat).getByText('기분 전환할 만한 작은 일이 있을까?')).toBeInTheDocument();
+    expect(screen.queryByRole('textbox', { name: '메시지' })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '회원 1' }));
+    await user.click(await screen.findByRole('link', { name: '회원 대화 기록' }));
+    const logs = await screen.findByRole('region', { name: '대화 기록 표' });
+    expect(within(logs).getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
+    expect(screen.queryByText('주말 계획을 같이 세워 줄래?')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('user_id=1');
+  });
+
+  it('로그인 기록이 없는 회원과 세션이 없는 회원을 표시한다', async () => {
+    const user = renderPage('/admin/users/2');
+    const info = await screen.findByRole('region', { name: '회원 정보' });
+    expect(within(info).getByText('—')).toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '회원 목록' }));
+    await user.click(await screen.findByRole('link', { name: '사용자 3 회원 상세' }));
+    await screen.findByText('대화 세션이 없어요.');
+  });
+
+  it('빈 세션과 실패·처리 중 기록을 구분한다', async () => {
+    const user = renderPage(`/admin/sessions/${emptyId}`);
+    await screen.findByText('아직 대화가 없어요.');
+    await user.click(screen.getByRole('link', { name: '회원 목록' }));
+    await user.click(await screen.findByRole('link', { name: '사용자B 회원 상세' }));
+    await user.click(
+      await screen.findByRole('link', { name: /이 긴 주소도 읽어 줄래.*대화 보기/ }),
+    );
+    await screen.findByText('응답 시간이 초과되었어요.');
+    expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
+  });
+
+  it.each(['/admin/users/999', '/admin/sessions/00000000-0000-4000-8000-000000000000'])(
+    '없는 대상 %s에서 오류와 복귀 링크를 표시한다',
+    async (path) => {
+      const user = renderPage(path);
+      expect(await screen.findByRole('alert')).toHaveTextContent(/찾을 수 없어요/);
+      expect(screen.queryByRole('button', { name: '다시 불러오기' })).not.toBeInTheDocument();
+      await user.click(screen.getByRole('link', { name: '회원 목록' }));
+      await screen.findByRole('link', { name: '사용자A 회원 상세' });
+    },
+  );
+
+  it.each(['/admin/users/abc', '/admin/sessions/abc'])(
+    '잘못된 대상 주소 %s를 요청 전에 표시한다',
+    (path) => {
+      renderPage(path);
+      expect(screen.getByRole('alert')).toHaveTextContent('주소를 확인해 주세요.');
+      expect(screen.queryByText('불러오는 중')).not.toBeInTheDocument();
+    },
+  );
+
+  it('조회 실패 후 같은 페이지를 재시도한다', async () => {
+    let calls = 0;
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users`, () => {
+        calls++;
+        if (calls === 1)
+          return HttpResponse.json({ error: { message: '회원 조회 실패' } }, { status: 500 });
+        return HttpResponse.json({
+          items: [
+            { id: 99, name: '재시도 회원', username: 'retry', created_at: '2026-10-05T03:00:00Z' },
+          ],
+          total: 1,
+          page: 1,
+          size: 20,
+        });
+      }),
+    );
+    const user = renderPage();
+    await screen.findByText('회원 조회 실패');
+    await user.click(screen.getByRole('button', { name: '다시 불러오기' }));
+    await screen.findByRole('link', { name: '재시도 회원 회원 상세' });
+    expect(calls).toBe(2);
+  });
+
+  it('이전 회원 응답이 늦게 와도 현재 회원을 바꾸지 않는다', async () => {
+    let release!: () => void;
+    const deferred = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let signal: AbortSignal | undefined;
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users/1`, async ({ request }) => {
+        signal = request.signal;
+        await deferred;
+        return HttpResponse.json({
+          id: 1,
+          name: '이전 회원',
+          username: 'old',
+          created_at: '2026-10-05T03:00:00Z',
+          last_login_at: null,
+        });
+      }),
+    );
+    const user = renderPage('/admin/users/1');
+    try {
+      await waitFor(() => expect(signal).toBeDefined());
+      await user.click(screen.getByRole('link', { name: '회원 목록' }));
+      await user.click(await screen.findByRole('link', { name: '사용자B 회원 상세' }));
+      await screen.findByRole('heading', { name: '사용자B' });
+      await waitFor(() => expect(signal?.aborted).toBe(true));
+      await act(async () => release());
+      expect(screen.queryByText('이전 회원')).not.toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+});
+
+describe('관리자 조회 조건', () => {
+  it('회원·KST 기간 조건을 UTC 요청에 적용하고 페이지를 초기화한다', async () => {
+    let query: URLSearchParams | undefined;
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/logs`, ({ request }) => {
+        query = new URL(request.url).searchParams;
+        return HttpResponse.json({
+          items: [],
+          total: 0,
+          page: Number(query.get('page')),
+          size: Number(query.get('size')),
+        });
+      }),
+    );
+    const user = renderPage('/admin/logs?page=2&size=10');
+    await screen.findByText('조건에 맞는 대화 기록이 없어요.');
+    await user.type(screen.getByRole('textbox', { name: '회원 ID' }), '2');
+    fireEvent.change(screen.getByLabelText('시작 시각 (KST)'), {
+      target: { value: '2026-10-04T14:20:00' },
+    });
+    fireEvent.change(screen.getByLabelText('종료 시각 (KST)'), {
+      target: { value: '2026-10-04T14:23:00' },
+    });
+    await user.click(screen.getByRole('button', { name: '조회' }));
+    await waitFor(() => expect(query?.get('start')).toBe('2026-10-04T05:20:00.000Z'));
+    expect(query?.get('end')).toBe('2026-10-04T05:23:00.000Z');
+    expect(query?.get('page')).toBe('1');
+    expect(query?.get('size')).toBe('10');
+    expect(query?.get('user_id')).toBe('2');
+  });
+
+  it('잘못된 URL의 기간·회원 조건을 표시하고 초기화할 수 있다', async () => {
+    const user = renderPage('/admin/logs?user_id=wrong&start=invalid');
+    expect(screen.getByRole('alert')).toHaveTextContent('회원 ID는 양의 정수');
+    await user.click(screen.getByRole('button', { name: '초기화' }));
+    await screen.findByRole('region', { name: '대화 기록 표' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('빈 목록 시나리오를 회원 목록에 적용한다', async () => {
+    vi.stubEnv('VITE_ADMIN_MOCK_SCENARIO', 'empty');
+    renderPage();
+    await screen.findByText('회원이 없어요.');
+    expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
+  });
+});
+
+describe('관리자 MSW API 계약', () => {
+  it('회원별 기록과 세션·상세의 식별자와 수량이 일치한다', async () => {
+    const user = await apiRequest<AdminUserDetail>('/api/v1/admin/users/2');
+    const sessions = await apiRequest<AdminPage<AdminSession>>('/api/v1/admin/sessions?user_id=2');
+    const detail = await apiRequest<AdminSessionDetail>(`/api/v1/admin/sessions/${secondId}`);
+    const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=2');
+    expect(user.last_login_at).toBeNull();
+    expect(sessions.items.map((session) => session.chat_id)).toEqual([secondId]);
+    expect(detail.message_count).toBe(detail.messages.length);
+    expect(logs.items.map((log) => log.request_id).sort()).toEqual(
+      detail.messages.map((message) => message.request_id).sort(),
+    );
+    expect(logs.items.every((log) => log.chat_id === secondId)).toBe(true);
+  });
+
+  it('회원 대화 기록에 기간 조건을 적용한다', async () => {
+    const records = await apiRequest<AdminPage<ChatMessage>>(
+      '/api/v1/admin/logs?user_id=1&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
+    );
+    expect(records.total).toBe(1);
+    expect(records.items[0].question).toBe('기분 전환할 만한 작은 일이 있을까?');
+  });
+
+  it('사용자 대화 생성·전송·삭제를 관리자 조회에도 반영한다', async () => {
+    const session = await apiRequest<ChatSession>('/api/v1/chats', { method: 'POST' });
+    await apiRequest(`/api/v1/chats/${session.chat_id}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: '관리자에서도 조회할 질문' }),
+    });
+    const detail = await apiRequest<AdminSessionDetail>(
+      `/api/v1/admin/sessions/${session.chat_id}`,
+    );
+    expect(detail.user_id).toBe(1);
+    expect(detail.message_count).toBe(1);
+    expect(detail.messages[0].question).toBe('관리자에서도 조회할 질문');
+    await apiRequest(`/api/v1/chats/${session.chat_id}`, { method: 'DELETE' });
+    await expect(apiRequest(`/api/v1/admin/sessions/${session.chat_id}`)).rejects.toMatchObject({
+      status: 404,
+    });
+    const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=1');
+    expect(logs.items.some((message) => message.chat_id === session.chat_id)).toBe(false);
+  });
+
+  it('필수 회원 ID·페이지 범위가 잘못되면 422를 반환한다', async () => {
+    for (const path of ['/sessions', '/users?size=101', '/logs?user_id=wrong']) {
+      await expect(apiRequest(`/api/v1/admin${path}`)).rejects.toMatchObject({ status: 422 });
+    }
+  });
+});

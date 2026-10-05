@@ -277,7 +277,7 @@ describe('대화 삭제', () => {
       const dialog = await openDelete(user, emptyDelete);
       await user.click(within(dialog).getByRole('button', { name: '삭제' }));
       await screen.findByRole('button', { name: '새 대화 시작' });
-      expect(signal?.aborted).toBe(true);
+      await waitFor(() => expect(signal?.aborted).toBe(true));
       await act(async () => {
         release?.();
         await delay(50);

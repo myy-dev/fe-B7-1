@@ -1,14 +1,21 @@
 import DuckAvatar from './DuckAvatar';
 import { formatChatTime, type ChatMessage } from '../lib/chats';
 
-export default function ChatMessages({ messages }: { messages: ChatMessage[] }) {
+export default function ChatMessages({
+  messages,
+  questionAuthor = '나',
+}: {
+  messages: ChatMessage[];
+  questionAuthor?: string;
+}) {
   return (
     <ol aria-label="대화 기록" className="space-y-6">
       {messages.map((message) => (
         <li key={message.request_id}>
           <div className="chat-end chat">
             <div className="chat-header mb-1 text-xs text-base-content/70">
-              나 <time dateTime={message.created_at}>{formatChatTime(message.created_at)}</time>
+              {questionAuthor}{' '}
+              <time dateTime={message.created_at}>{formatChatTime(message.created_at)}</time>
             </div>
             <div className="chat-bubble max-w-[85%] chat-bubble-primary text-sm leading-relaxed wrap-anywhere whitespace-pre-wrap sm:text-base">
               {message.question}
