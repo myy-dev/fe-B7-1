@@ -1,3 +1,4 @@
+/*! 🌼 daisyUI 5.7.47 */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -11,9 +12,7 @@ describe('기본 라우팅', () => {
         <App />
       </MemoryRouter>,
     );
-    expect(
-      screen.getByRole('heading', { name: '새로운 프로젝트를 시작합니다' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
   });
 
   it('잘못된 주소에서 안내를 표시하고 홈으로 돌아갈 수 있다', async () => {
@@ -25,8 +24,6 @@ describe('기본 라우팅', () => {
     );
     expect(screen.getByRole('heading', { name: '페이지를 찾을 수 없습니다' })).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '홈으로 이동' }));
-    expect(
-      screen.getByRole('heading', { name: '새로운 프로젝트를 시작합니다' }),
-    ).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
   });
 });
