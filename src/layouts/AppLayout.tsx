@@ -1,4 +1,3 @@
-/*! 🌼 daisyUI 5.7.47 */
 import { Link, Outlet } from 'react-router';
 import DuckAvatar from '../components/DuckAvatar';
 
@@ -17,7 +16,7 @@ export default function AppLayout() {
           className="navbar mx-auto min-h-20 max-w-6xl justify-between gap-4 px-5 sm:px-8"
         >
           <Link
-            to="/"
+            to="/chats"
             aria-label="꽥꽥이 처음 화면"
             className="flex items-center gap-2.5 rounded-field"
           >
