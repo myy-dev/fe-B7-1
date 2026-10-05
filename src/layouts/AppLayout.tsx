@@ -25,7 +25,14 @@ export default function AppLayout() {
             </span>
             <span className="text-xl font-extrabold tracking-tight">꽥꽥이</span>
           </Link>
-          <span className="hidden text-sm text-base-content/70 sm:inline">대화하는 오리 친구</span>
+          <div className="flex items-center gap-3">
+            <span className="hidden text-sm text-base-content/70 sm:inline">
+              대화하는 오리 친구
+            </span>
+            <Link to="/login" className="btn btn-ghost btn-sm">
+              로그인
+            </Link>
+          </div>
         </nav>
       </header>
       <main
