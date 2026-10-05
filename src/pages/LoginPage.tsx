@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ApiError, apiRequest } from '../lib/api';
 
 export default function LoginPage() {
@@ -121,6 +121,11 @@ export default function LoginPage() {
           {pending ? '로그인 중…' : '로그인'}
         </button>
       </form>
+      <p className="mt-6 text-center text-sm text-base-content/70">
+        <Link to="/signup" className="link font-semibold text-base-content">
+          회원가입
+        </Link>
+      </p>
     </section>
   );
 }

@@ -4,6 +4,7 @@ import AuthLayout from './layouts/AuthLayout';
 import HomePage from './pages/HomePage';
 import LoginPage from './pages/LoginPage';
 import NotFoundPage from './pages/NotFoundPage';
+import SignupPage from './pages/SignupPage';
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/chats" element={<HomePage />} />
         <Route element={<AuthLayout />}>
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
         </Route>
         <Route path="*" element={<NotFoundPage />} />
       </Route>
