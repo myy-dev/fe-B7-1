@@ -34,6 +34,27 @@ describe('API 요청과 MSW 연동', () => {
     });
   });
 
+  it('채팅 API 공통 오류 응답의 메시지를 전달한다', async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/api/example`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'DB_ERROR',
+              message: '대화 목록을 불러오지 못했어요.',
+              request_id: 'request-id',
+            },
+          },
+          { status: 500 },
+        ),
+      ),
+    );
+    await expect(apiRequest('/api/example')).rejects.toMatchObject({
+      status: 500,
+      message: '대화 목록을 불러오지 못했어요.',
+    });
+  });
+
   it('응답 본문이 없는 삭제 요청도 처리한다', async () => {
     server.use(
       http.delete(`${API_BASE_URL}/api/example`, () => new HttpResponse(null, { status: 204 })),
