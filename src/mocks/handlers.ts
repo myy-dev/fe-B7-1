@@ -77,6 +77,7 @@ const exampleChats: ChatDetail[] = [
 
 let chatStore = makeChatStore();
 let sendFailures = new Set<string>();
+let deleteFailures = new Set<string>();
 
 function makeChatStore() {
   const items =
@@ -87,6 +88,7 @@ function makeChatStore() {
 export function resetChatMocks() {
   chatStore = makeChatStore();
   sendFailures = new Set();
+  deleteFailures = new Set();
 }
 
 function chatError(
@@ -134,6 +136,23 @@ export const handlers = [
     return chat
       ? HttpResponse.json(chat)
       : chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+  }),
+  // 삭제 API 명세 확정 전의 임시 계약: DELETE /chats/:chatId, 성공 204.
+  http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params }) => {
+    const store = chatStore;
+    const failures = deleteFailures;
+    const id = String(params.chatId);
+    const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
+    await delay(scenario === 'slow' ? 1500 : 600);
+    if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id))
+      return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
+    if (!store.has(id)) return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+    if (scenario === 'delete-error' && !failures.has(id)) {
+      failures.add(id);
+      return chatError('DB_ERROR', '대화를 삭제하지 못했어요. 다시 시도해 주세요.', 500);
+    }
+    store.delete(id);
+    return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/chats/:chatId/messages`, async ({ params, request }) => {
     const store = chatStore;
