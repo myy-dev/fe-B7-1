@@ -2,12 +2,18 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 import App from './App';
+import { API_BASE_URL } from './lib/api';
 import './index.css';
 
 async function bootstrap() {
-  if (import.meta.env.DEV && import.meta.env.VITE_ENABLE_MSW === 'true') {
+  if (import.meta.env.VITE_ENABLE_MSW === 'true') {
     const { worker } = await import('./mocks/browser');
-    await worker.start({ onUnhandledRequest: 'bypass' });
+    await worker.start({
+      onUnhandledRequest(request, print) {
+        // 모킹되지 않은 API가 실제 백엔드로 전달되지 않도록 한다.
+        if (request.url.startsWith(`${API_BASE_URL}/api/`)) print.error();
+      },
+    });
   }
 
   const root = document.getElementById('root');
