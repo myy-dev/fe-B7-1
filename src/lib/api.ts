@@ -17,6 +17,14 @@ function getErrorMessage(body: unknown, status: number): string {
   if (typeof body === 'object' && body !== null) {
     if ('message' in body && typeof body.message === 'string') return body.message;
     if ('detail' in body && typeof body.detail === 'string') return body.detail;
+    if (
+      'error' in body &&
+      typeof body.error === 'object' &&
+      body.error !== null &&
+      'message' in body.error &&
+      typeof body.error.message === 'string'
+    )
+      return body.error.message;
   }
   return `요청에 실패했습니다. (${status})`;
 }

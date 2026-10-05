@@ -1,6 +1,7 @@
+import type { ReactNode } from 'react';
 import DuckAvatar from '../components/DuckAvatar';
 
-export default function HomePage() {
+export default function HomePage({ children }: { children?: ReactNode }) {
   return (
     <section aria-labelledby="welcome-title" className="w-full max-w-2xl text-center">
       <div className="relative mx-auto mb-8 grid size-48 place-items-center rounded-full bg-secondary sm:size-56">
@@ -22,6 +23,7 @@ export default function HomePage() {
         <br />
         편하게 이야기해 주세요.
       </p>
+      {children}
     </section>
   );
 }
