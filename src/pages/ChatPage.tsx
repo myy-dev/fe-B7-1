@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, NavLink, useParams } from 'react-router';
+import { Link, NavLink, useNavigate, useParams } from 'react-router';
 import ChatMessages from '../components/ChatMessages';
+import DeleteChatDialog from '../components/DeleteChatDialog';
 import DuckAvatar from '../components/DuckAvatar';
 import NewChatButton from '../components/NewChatButton';
 import { ApiError, apiRequest } from '../lib/api';
@@ -21,9 +22,17 @@ type SessionListState = {
 
 export default function ChatPage() {
   const { chatId } = useParams();
+  const navigate = useNavigate();
+  const currentChatId = useRef(chatId);
   const [list, setList] = useState<SessionListState>({ status: 'loading', items: [], error: '' });
   const [listAttempt, setListAttempt] = useState(0);
+  const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   const createdSessions = useRef<ChatSession[]>([]);
+  const deletedSessions = useRef(new Set<string>());
+
+  useEffect(() => {
+    currentChatId.current = chatId;
+  }, [chatId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -38,7 +47,7 @@ export default function ChatPage() {
           ...new Map(
             [...result.items, ...createdSessions.current].map((item) => [item.chat_id, item]),
           ).values(),
-        ];
+        ].filter((item) => !deletedSessions.current.has(item.chat_id));
         setList({ status: 'success', items: sortSessions(items), error: '' });
       } catch (cause) {
         if (!controller.signal.aborted) {
@@ -68,42 +77,61 @@ export default function ChatPage() {
     }));
   }
 
-  if (!chatId) {
-    return (
-      <HomePage>
-        <div className="mx-auto mt-8 max-w-xs">
-          <NewChatButton label="새 대화 시작" onCreated={addSession} />
-        </div>
-        <section aria-labelledby="recent-chats-title" className="mx-auto mt-10 max-w-md text-left">
-          <h2 id="recent-chats-title" className="mb-3 text-sm font-semibold">
-            대화 목록
-          </h2>
-          <SessionList list={list} onRetry={retryList} />
-        </section>
-      </HomePage>
-    );
+  function removeSession(id: string) {
+    deletedSessions.current.add(id);
+    createdSessions.current = createdSessions.current.filter((session) => session.chat_id !== id);
+    setList((current) => ({
+      ...current,
+      items: current.items.filter((session) => session.chat_id !== id),
+    }));
+    if (currentChatId.current === id) navigate('/chats', { replace: true });
   }
 
+  const deleteDialog = deleteTarget && (
+    <DeleteChatDialog
+      key={`delete-${deleteTarget.chat_id}`}
+      session={deleteTarget}
+      onDeleted={removeSession}
+      onClose={() => setDeleteTarget(null)}
+    />
+  );
+
   return (
-    <div className="grid w-full min-w-0 items-start gap-5 lg:grid-cols-[17rem_minmax(0,1fr)]">
-      <aside aria-label="대화 선택" className="card min-w-0 border border-base-300 bg-base-100">
-        <div className="card-body gap-4 p-4">
+    <div className="grid w-full min-w-0 items-start gap-5 lg:min-h-0 lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-stretch">
+      <aside
+        aria-label="대화 선택"
+        className="card min-w-0 border border-base-300 bg-base-100 lg:min-h-0"
+      >
+        <div className="card-body gap-4 p-4 lg:min-h-0">
           <h2 className="text-lg font-bold">대화 목록</h2>
-          <NewChatButton key={chatId} onCreated={addSession} />
-          <div className="max-h-40 overflow-y-auto lg:max-h-[28rem]">
-            <SessionList list={list} onRetry={retryList} />
+          <NewChatButton
+            key={chatId ?? 'home'}
+            label={chatId ? '새 대화' : '새 대화 시작'}
+            onCreated={addSession}
+          />
+          <div className="max-h-40 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1">
+            <SessionList list={list} onRetry={retryList} onDelete={setDeleteTarget} />
           </div>
           <Link to="/chats" className="link text-center text-sm text-base-content/70">
             처음 화면
           </Link>
         </div>
       </aside>
-      <ChatDetailView key={chatId} chatId={chatId} />
+      {chatId ? <ChatDetailView key={chatId} chatId={chatId} /> : <HomePage />}
+      {deleteDialog}
     </div>
   );
 }
 
-function SessionList({ list, onRetry }: { list: SessionListState; onRetry: () => void }) {
+function SessionList({
+  list,
+  onRetry,
+  onDelete,
+}: {
+  list: SessionListState;
+  onRetry: () => void;
+  onDelete: (session: ChatSession) => void;
+}) {
   return (
     <div className="space-y-3">
       {list.status === 'loading' && (
@@ -131,10 +159,10 @@ function SessionList({ list, onRetry }: { list: SessionListState; onRetry: () =>
         <nav aria-label="대화 목록">
           <ul className="menu w-full gap-1 p-0">
             {list.items.map((session) => (
-              <li key={session.chat_id}>
+              <li key={session.chat_id} className="flex-row items-center gap-1">
                 <NavLink
                   to={`/chats/${encodeURIComponent(session.chat_id)}`}
-                  className={({ isActive }) => (isActive ? 'menu-active' : '')}
+                  className={({ isActive }) => `min-w-0 flex-1 ${isActive ? 'menu-active' : ''}`}
                 >
                   <time
                     dateTime={session.created_at}
@@ -143,6 +171,25 @@ function SessionList({ list, onRetry }: { list: SessionListState; onRetry: () =>
                     {formatChatTime(session.created_at)} 대화
                   </time>
                 </NavLink>
+                <button
+                  type="button"
+                  className="btn btn-square shrink-0 btn-ghost text-base-content/60 btn-sm hover:text-error"
+                  aria-label={`${formatChatTime(session.created_at)} 대화 삭제`}
+                  onClick={() => onDelete(session)}
+                >
+                  <svg
+                    aria-hidden="true"
+                    viewBox="0 0 24 24"
+                    className="size-4"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M3 6h18M9 6V4h6v2M5 6l1 14h12l1-14M10 10v6M14 10v6" />
+                  </svg>
+                </button>
               </li>
             ))}
           </ul>
@@ -279,8 +326,11 @@ function ChatDetailView({ chatId }: { chatId: string }) {
   }
 
   return (
-    <section aria-label="선택한 대화" className="card min-w-0 border border-base-300 bg-base-100">
-      <div className="card-body min-h-96 gap-6 p-5 sm:p-8">
+    <section
+      aria-label="선택한 대화"
+      className="card min-w-0 border border-base-300 bg-base-100 lg:min-h-0"
+    >
+      <div className="card-body min-h-96 gap-6 p-5 sm:p-8 lg:min-h-0">
         {state.status === 'loading' && (
           <p role="status" className="m-auto flex items-center gap-2 text-sm text-base-content/70">
             <span aria-hidden="true" className="loading loading-sm loading-spinner" />
@@ -308,7 +358,7 @@ function ChatDetailView({ chatId }: { chatId: string }) {
         )}
         {state.status === 'success' && state.detail && (
           <>
-            <header className="border-b border-base-300 pb-4">
+            <header className="shrink-0 border-b border-base-300 pb-4">
               <h1 className="text-xl font-bold">
                 {state.detail.messages.length ? '꽥꽥이와의 대화' : '새 대화'}
               </h1>
@@ -324,14 +374,14 @@ function ChatDetailView({ chatId }: { chatId: string }) {
               role="region"
               aria-label="대화 내용"
               tabIndex={0}
-              className="max-h-[min(50dvh,32rem)] min-h-48 overflow-y-auto rounded-field p-1"
+              className="max-h-[min(50dvh,32rem)] min-h-48 overflow-y-auto rounded-field p-1 lg:max-h-none lg:min-h-0 lg:flex-1"
             >
               {state.detail.messages.length || outgoing ? (
                 <ChatMessages
                   messages={[...state.detail.messages, ...(outgoing ? [outgoing] : [])]}
                 />
               ) : (
-                <div className="grid min-h-48 content-center text-center">
+                <div className="grid min-h-48 content-center text-center lg:h-full lg:min-h-0">
                   <DuckAvatar className="mx-auto mb-4 size-24" />
                   <p role="status" className="text-base-content/70">
                     아직 대화가 없어요.
@@ -340,18 +390,18 @@ function ChatDetailView({ chatId }: { chatId: string }) {
               )}
             </div>
             {delayed && outgoing && (
-              <p role="status" className="text-sm text-base-content/70">
+              <p role="status" className="shrink-0 text-sm text-base-content/70">
                 답변을 기다리고 있어요.
               </p>
             )}
             {sendError && (
-              <p role="alert" className="alert text-sm alert-error">
+              <p role="alert" className="alert shrink-0 text-sm alert-error">
                 {sendError}
               </p>
             )}
             <form
               aria-label="메시지 전송"
-              className="mt-auto flex min-w-0 items-end gap-2 border-t border-base-300 pt-4"
+              className="mt-auto flex min-w-0 shrink-0 items-end gap-2 border-t border-base-300 pt-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void sendQuestion();
@@ -363,7 +413,7 @@ function ChatDetailView({ chatId }: { chatId: string }) {
               <textarea
                 ref={input}
                 id="chat-question"
-                className="textarea min-h-12 min-w-0 flex-1 resize-y bg-base-100"
+                className="textarea min-h-12 min-w-0 flex-1 resize-y bg-base-100 lg:max-h-[25dvh]"
                 rows={2}
                 placeholder="꽥꽥이에게 이야기해 보세요"
                 value={draft}
