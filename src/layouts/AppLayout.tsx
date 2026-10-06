@@ -28,9 +28,14 @@ export default function AppLayout() {
             </span>
             <span className="text-xl font-extrabold tracking-tight">꽥꽥이</span>
           </Link>
-          <Link to="/login" className="btn btn-ghost btn-sm">
-            로그인
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link to="/admin/users" className="btn btn-ghost btn-sm">
+              관리자
+            </Link>
+            <Link to="/login" className="btn btn-ghost btn-sm">
+              로그인
+            </Link>
+          </div>
         </nav>
       </header>
       <main

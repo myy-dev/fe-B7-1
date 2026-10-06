@@ -1,6 +1,12 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
+import {
+  dateRangeError,
+  positiveInteger,
+  type AdminUserDetail,
+  type SystemLog,
+} from '../lib/admin';
 
 const exampleChats: ChatDetail[] = [
   {
@@ -75,6 +81,84 @@ const exampleChats: ChatDetail[] = [
   },
 ];
 
+const adminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => ({
+  id: index + 1,
+  username: index === 0 ? 'user_a' : index === 1 ? 'user_b' : `user_${index + 1}`,
+  name: index === 0 ? '사용자A' : index === 1 ? '사용자B' : `사용자 ${index + 1}`,
+  created_at: new Date(Date.UTC(2026, 8, 30 - index, 3)).toISOString(),
+  last_login_at: index % 2 === 0 ? '2026-10-05T03:00:00Z' : null,
+}));
+
+const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
+  const event = ['request_received', 'ai_call_succeeded', 'ai_call_failed', 'user_login_failed'][
+    index % 4
+  ];
+  const userId = index % 7 === 0 ? null : (index % 2) + 1;
+  return {
+    timestamp: new Date(Date.UTC(2026, 9, 5, 7) - index * 3600000).toISOString(),
+    level:
+      event === 'ai_call_failed' ? 'ERROR' : event === 'user_login_failed' ? 'WARNING' : 'INFO',
+    event,
+    request_id: userId ? exampleChats[userId - 1].messages[0].request_id : null,
+    user_id: userId,
+  };
+});
+// 동일한 시각·내용의 로그도 각각 한 건으로 표시한다.
+adminSystemLogs.splice(1, 0, { ...adminSystemLogs[0] });
+
+function getAdminSessions(store: Map<string, ChatDetail>) {
+  return sortSessions([...store.values()]).map((chat) => ({
+    chat_id: chat.chat_id,
+    user_id: chat.chat_id === exampleChats[1].chat_id ? 2 : 1,
+    title: chat.messages[0]?.question.slice(0, 40) || '새 대화',
+    created_at: chat.created_at,
+    message_count: chat.messages.length,
+  }));
+}
+
+function readAdminQuery(request: Request, requireUser = false) {
+  const search = new URL(request.url).searchParams;
+  const page = positiveInteger(search.get('page') ?? '1');
+  const size = positiveInteger(search.get('size') ?? '20');
+  const userId = positiveInteger(search.get('user_id'));
+  const start = search.get('start');
+  const end = search.get('end');
+  if (
+    !page ||
+    !size ||
+    size > 100 ||
+    ((requireUser || search.has('user_id')) && !userId) ||
+    dateRangeError(start, end)
+  )
+    return null;
+  return { page, size, userId, start, end, level: search.get('level'), event: search.get('event') };
+}
+
+function withinPeriod(time: string, start: string | null, end: string | null) {
+  return (
+    (!start || Date.parse(time) >= Date.parse(start)) &&
+    (!end || Date.parse(time) <= Date.parse(end))
+  );
+}
+
+function adminPage<T>(items: T[], page: number, size: number) {
+  const rows = import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'empty' ? [] : items;
+  return HttpResponse.json({
+    items: rows.slice((page - 1) * size, page * size),
+    total: rows.length,
+    page,
+    size,
+  });
+}
+
+async function adminFailure(section: string) {
+  const scenario = import.meta.env.VITE_ADMIN_MOCK_SCENARIO;
+  await delay(scenario === 'slow' ? 1500 : 300);
+  return scenario === 'error' || scenario === `${section}-error`
+    ? chatError('DB_ERROR', '조회하지 못했어요. 다시 시도해 주세요.', 500)
+    : null;
+}
+
 let chatStore = makeChatStore();
 let sendFailures = new Set<string>();
 let deleteFailures = new Set<string>();
@@ -100,8 +184,86 @@ function chatError(
   return HttpResponse.json({ error: { code, message, request_id: requestId } }, { status });
 }
 
-// 세팅 확인용 예제이며 실제 백엔드 API 계약이 아니다.
 export const handlers = [
+  http.get(`${API_BASE_URL}/api/v1/admin/users`, async ({ request }) => {
+    const failure = await adminFailure('users');
+    if (failure) return failure;
+    const query = readAdminQuery(request);
+    if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
+    return adminPage(
+      adminUsers.map(({ id, username, name, created_at }) => ({ id, username, name, created_at })),
+      query.page,
+      query.size,
+    );
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ params }) => {
+    const failure = await adminFailure('user');
+    if (failure) return failure;
+    const id = positiveInteger(String(params.userId));
+    if (!id) return chatError('INVALID_INPUT', '회원 주소를 확인해 주세요.', 422);
+    const user = adminUsers.find((item) => item.id === id);
+    return user
+      ? HttpResponse.json(user)
+      : chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/sessions`, async ({ request }) => {
+    const store = chatStore;
+    const failure = await adminFailure('sessions');
+    if (failure) return failure;
+    const query = readAdminQuery(request, true);
+    if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
+    return adminPage(
+      getAdminSessions(store).filter((session) => session.user_id === query.userId),
+      query.page,
+      query.size,
+    );
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/sessions/:chatId`, async ({ params }) => {
+    const store = chatStore;
+    const failure = await adminFailure('session');
+    if (failure) return failure;
+    const id = String(params.chatId);
+    const session = getAdminSessions(store).find((item) => item.chat_id === id);
+    const chat = store.get(id);
+    return session && chat
+      ? HttpResponse.json({ ...session, messages: chat.messages })
+      : chatError('SESSION_NOT_FOUND', '세션을 찾을 수 없어요.', 404);
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/logs`, async ({ request }) => {
+    const store = chatStore;
+    const failure = await adminFailure('logs');
+    if (failure) return failure;
+    const query = readAdminQuery(request);
+    if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
+    const sessions = getAdminSessions(store).filter(
+      (session) => !query.userId || session.user_id === query.userId,
+    );
+    const messages = sessions
+      .flatMap((session) => store.get(session.chat_id)?.messages ?? [])
+      .filter((message) => withinPeriod(message.created_at, query.start, query.end))
+      .sort(
+        (a, b) =>
+          Date.parse(b.created_at) - Date.parse(a.created_at) ||
+          b.request_id.localeCompare(a.request_id),
+      );
+    return adminPage(messages, query.page, query.size);
+  }),
+  http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, async ({ request }) => {
+    const failure = await adminFailure('system');
+    if (failure) return failure;
+    const query = readAdminQuery(request);
+    if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
+    const rows = adminSystemLogs
+      .filter(
+        (log) =>
+          (!query.level || log.level === query.level) &&
+          (!query.event || log.event === query.event) &&
+          withinPeriod(log.timestamp, query.start, query.end),
+      )
+      .sort((a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp));
+    return adminPage(rows, query.page, query.size);
+  }),
+  // 세팅 확인용 예제이며 실제 백엔드 API 계약이 아니다.
   http.get(`${API_BASE_URL}/api/example`, () =>
     HttpResponse.json({ message: 'MSW가 API 응답을 제공합니다.' }),
   ),

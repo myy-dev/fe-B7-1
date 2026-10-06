@@ -18,7 +18,7 @@ export interface ChatDetail extends ChatSession {
   messages: ChatMessage[];
 }
 
-export function sortSessions(items: ChatSession[]): ChatSession[] {
+export function sortSessions<T extends ChatSession>(items: T[]): T[] {
   return [...items].sort(
     (a, b) =>
       Date.parse(b.created_at) - Date.parse(a.created_at) || b.chat_id.localeCompare(a.chat_id),
