@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
-import { ApiError, apiRequest, isMockEnabled } from '../lib/api';
+import { ApiError, apiRequest } from '../lib/api';
+import { useAuth, type LoginResponse } from '../lib/auth';
 
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const mockEnabled = isMockEnabled();
+  const { signIn } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
@@ -17,10 +18,18 @@ export default function LoginPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (request.current || !mockEnabled) return;
+    if (request.current) return;
     const nextErrors = {
-      username: username.trim() ? '' : '아이디를 입력해 주세요.',
-      password: password.trim() ? '' : '비밀번호를 입력해 주세요.',
+      username: !username
+        ? '아이디를 입력해 주세요.'
+        : username.length < 4 || username.length > 20 || /[^a-zA-Z0-9_]/.test(username)
+          ? '아이디는 영문·숫자·밑줄로 4~20자 입력해 주세요.'
+          : '',
+      password: !password
+        ? '비밀번호를 입력해 주세요.'
+        : [...password].length < 8 || [...password].length > 128
+          ? '비밀번호는 8~128자로 입력해 주세요.'
+          : '',
     };
     setErrors(nextErrors);
     setError('');
@@ -30,18 +39,24 @@ export default function LoginPage() {
     request.current = controller;
     setPending(true);
     try {
-      // 회원 API 확정 전의 퍼블리싱용 임시 계약. 인증 상태는 저장하지 않는다.
-      await apiRequest('/api/v1/auth/login', {
+      const response = await apiRequest<LoginResponse>('/api/v1/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: username.trim(), password }),
+        body: JSON.stringify({ username, password }),
         signal: controller.signal,
       });
-      if (!controller.signal.aborted) navigate('/chats');
+      if (!controller.signal.aborted) {
+        signIn(response);
+        navigate('/chats', { replace: true });
+      }
     } catch (cause) {
       if (!controller.signal.aborted) {
         setError(
-          cause instanceof ApiError ? cause.message : '연결하지 못했어요. 다시 시도해 주세요.',
+          cause instanceof ApiError
+            ? cause.message
+            : cause instanceof Error && cause.message.startsWith('로그인 응답')
+              ? cause.message
+              : '연결하지 못했어요. 다시 시도해 주세요.',
         );
       }
     } finally {
@@ -123,9 +138,9 @@ export default function LoginPage() {
             {error}
           </div>
         )}
-        <button type="submit" className="btn w-full btn-primary" disabled={pending || !mockEnabled}>
+        <button type="submit" className="btn w-full btn-primary" disabled={pending}>
           {pending && <span aria-hidden="true" className="loading loading-sm loading-spinner" />}
-          {!mockEnabled ? '로그인 준비 중' : pending ? '로그인 중…' : '로그인'}
+          {pending ? '로그인 중…' : '로그인'}
         </button>
       </form>
       <p className="mt-6 text-center text-sm text-base-content/70">

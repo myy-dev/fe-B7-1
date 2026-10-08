@@ -1,5 +1,6 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
+import type { LoginResponse } from '../lib/auth';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
 import {
   dateRangeError,
@@ -163,6 +164,21 @@ let chatStore = makeChatStore();
 let sendFailures = new Set<string>();
 let deleteFailures = new Set<string>();
 let signupUsernames = new Set(['duck', 'taken']);
+export function createMockLoginResponse(expiresIn = 1800): LoginResponse {
+  // 미리보기 새로고침 후에도 유효한 토큰을 확인할 수 있도록 만료 시각을 포함한다.
+  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}`;
+  return { access_token: token, token_type: 'bearer', expires_in: expiresIn };
+}
+
+function authenticationError(request: Request) {
+  const token = request.headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
+  const match = /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)$/.exec(
+    token,
+  );
+  if (!match || Number(match[1]) <= Date.now())
+    return chatError('UNAUTHORIZED', '로그인이 필요합니다.', 401);
+  return null;
+}
 
 export function resetAuthMocks() {
   signupUsernames = new Set(['duck', 'taken']);
@@ -272,7 +288,9 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/example`, () =>
     HttpResponse.json({ message: 'MSW가 API 응답을 제공합니다.' }),
   ),
-  http.get(`${API_BASE_URL}/api/v1/chats`, async () => {
+  http.get(`${API_BASE_URL}/api/v1/chats`, async ({ request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
     await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
     if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'list-error')
@@ -283,7 +301,9 @@ export const handlers = [
     }));
     return HttpResponse.json({ items });
   }),
-  http.post(`${API_BASE_URL}/api/v1/chats`, async () => {
+  http.post(`${API_BASE_URL}/api/v1/chats`, async ({ request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
     await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 600);
     if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'create-error')
@@ -292,7 +312,9 @@ export const handlers = [
     store.set(session.chat_id, { ...session, messages: [] });
     return HttpResponse.json(session, { status: 201 });
   }),
-  http.get(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params }) => {
+  http.get(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
     await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(String(params.chatId)))
@@ -305,7 +327,9 @@ export const handlers = [
       : chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
   }),
   // 삭제 API 명세 확정 전의 임시 계약: DELETE /chats/:chatId, 성공 204.
-  http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params }) => {
+  http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
     const failures = deleteFailures;
     const id = String(params.chatId);
@@ -322,6 +346,8 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/chats/:chatId/messages`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
     const failures = sendFailures;
     const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
@@ -375,29 +401,26 @@ export const handlers = [
         : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
     return HttpResponse.json(message, { status: 201 });
   }),
-  // 로그인은 아직 서버에 없는 퍼블리싱용 임시 계약이다.
   http.post(`${API_BASE_URL}/api/v1/auth/login`, async ({ request }) => {
-    const { username, password } = (await request.json()) as {
-      username?: string;
-      password?: string;
-    };
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const username = body?.username;
+    const password = body?.password;
     await delay(600);
-    if (!username?.trim() || !password?.trim()) {
-      return HttpResponse.json({ message: '아이디와 비밀번호를 입력해 주세요.' }, { status: 422 });
-    }
-    if (username === 'wrong') {
-      return HttpResponse.json(
-        { message: '아이디 또는 비밀번호를 확인해 주세요.' },
-        { status: 401 },
-      );
-    }
-    if (username === 'error') {
-      return HttpResponse.json(
-        { message: '잠시 연결이 어려워요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ message: '로그인 미리보기 완료' });
+    if (
+      typeof username !== 'string' ||
+      !/^[a-zA-Z0-9_]{4,20}$/.test(username) ||
+      typeof password !== 'string' ||
+      [...password].length < 8 ||
+      [...password].length > 128 ||
+      !body ||
+      Object.keys(body).some((key) => !['username', 'password'].includes(key))
+    )
+      return chatError('INVALID_INPUT', '입력값을 확인해 주세요.', 422);
+    if (username.toLowerCase() === 'wrong')
+      return chatError('INVALID_CREDENTIALS', '아이디 또는 비밀번호가 올바르지 않습니다.', 401);
+    if (username.toLowerCase() === 'error')
+      return chatError('AUTH_CONFIGURATION_ERROR', '인증 서비스 설정을 확인해야 합니다.', 503);
+    return HttpResponse.json(createMockLoginResponse());
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/signup`, async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown> | null;

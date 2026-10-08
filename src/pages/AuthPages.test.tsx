@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL } from '../lib/api';
 import { server } from '../mocks/server';
+import { createMockLoginResponse } from '../mocks/handlers';
 
 function renderPage(path: string) {
   render(
@@ -23,7 +24,7 @@ async function fillSignup(user: ReturnType<typeof userEvent.setup>, username = '
   await user.type(screen.getByLabelText('비밀번호 확인'), 'example-password');
 }
 
-describe('로그인 미리보기', () => {
+describe('로그인 API 연결', () => {
   it('필수 입력 안내 후 회원가입 화면으로 이동한다', async () => {
     const user = renderPage('/login');
     await user.click(screen.getByRole('button', { name: '로그인' }));
@@ -40,11 +41,11 @@ describe('로그인 미리보기', () => {
         calls++;
         expect(await request.json()).toEqual({ username: 'friend', password: 'example-password' });
         await delay(150);
-        return HttpResponse.json({ message: '완료' });
+        return HttpResponse.json(createMockLoginResponse());
       }),
     );
     const user = renderPage('/login');
-    await user.type(screen.getByLabelText('아이디'), ' friend ');
+    await user.type(screen.getByLabelText('아이디'), 'friend');
     await user.type(screen.getByLabelText('비밀번호'), 'example-password');
     await user.dblClick(screen.getByRole('button', { name: '로그인' }));
     expect(screen.getByRole('button', { name: '로그인 중…' })).toBeDisabled();
@@ -59,7 +60,7 @@ describe('로그인 미리보기', () => {
     await user.type(screen.getByLabelText('비밀번호'), 'example-password');
     await user.click(screen.getByRole('button', { name: '로그인' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(
-      '아이디 또는 비밀번호를 확인해 주세요.',
+      '아이디 또는 비밀번호가 올바르지 않습니다.',
     );
     expect(screen.getByLabelText('비밀번호')).toHaveValue('example-password');
     await user.clear(screen.getByLabelText('아이디'));
@@ -126,7 +127,7 @@ describe('회원가입 API 연결', () => {
     await user.click(screen.getByRole('button', { name: '회원가입' }));
     await screen.findByRole('heading', { name: '로그인' });
     expect(screen.getByRole('status')).toHaveTextContent('회원가입 완료');
-    expect(screen.getByRole('button', { name: '로그인 준비 중' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '로그인' })).toBeEnabled();
     expect(calls).toBe(1);
   });
 
@@ -261,25 +262,5 @@ describe('회원가입 API 연결', () => {
     await user.type(screen.getByLabelText('비밀번호 확인'), ' '.repeat(8));
     await user.click(screen.getByRole('button', { name: '회원가입' }));
     await screen.findByRole('heading', { name: '로그인' });
-  });
-});
-
-describe('미구현 로그인 API', () => {
-  it('실제 API 모드에서 로그인 요청과 로그인 상태 생성을 막는다', async () => {
-    vi.stubEnv('VITE_ENABLE_MSW', 'false');
-    let calls = 0;
-    server.use(
-      http.post(`${API_BASE_URL}/api/v1/auth/login`, () => {
-        calls++;
-        return HttpResponse.json({});
-      }),
-    );
-    const user = renderPage('/login');
-    await user.type(screen.getByLabelText('아이디'), 'friend');
-    await user.type(screen.getByLabelText('비밀번호'), 'example-password');
-    expect(screen.getByRole('button', { name: '로그인 준비 중' })).toBeDisabled();
-    await user.keyboard('{Enter}');
-    expect(calls).toBe(0);
-    expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
   });
 });

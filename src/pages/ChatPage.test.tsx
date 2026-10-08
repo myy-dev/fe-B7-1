@@ -2,12 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatMessage, ChatSession } from '../lib/chats';
 import { resetChatMocks } from '../mocks/handlers';
 import { server } from '../mocks/server';
+import { createMockLoginResponse } from '../mocks/handlers';
+import { signIn } from '../lib/auth';
+
+beforeEach(() => signIn(createMockLoginResponse()));
 
 const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const secondId = '6eb321dc-235c-4e3d-a95e-43f2a601fcd8';
