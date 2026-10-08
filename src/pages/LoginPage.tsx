@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router';
-import { ApiError, apiRequest } from '../lib/api';
+import { Link, useLocation, useNavigate } from 'react-router';
+import { ApiError, apiRequest, isMockEnabled } from '../lib/api';
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const mockEnabled = isMockEnabled();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [pending, setPending] = useState(false);
@@ -15,7 +17,7 @@ export default function LoginPage() {
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (request.current) return;
+    if (request.current || !mockEnabled) return;
     const nextErrors = {
       username: username.trim() ? '' : '아이디를 입력해 주세요.',
       password: password.trim() ? '' : '비밀번호를 입력해 주세요.',
@@ -55,6 +57,11 @@ export default function LoginPage() {
       <h1 id="login-title" className="text-2xl font-bold">
         로그인
       </h1>
+      {location.state?.signupComplete === true && (
+        <p role="status" className="mt-5 alert text-sm alert-success">
+          회원가입 완료
+        </p>
+      )}
       <form noValidate onSubmit={handleSubmit} aria-busy={pending} className="mt-6 space-y-5">
         <div className="fieldset p-0">
           <label htmlFor="login-username" className="fieldset-label text-base-content">
@@ -116,9 +123,9 @@ export default function LoginPage() {
             {error}
           </div>
         )}
-        <button type="submit" className="btn w-full btn-primary" disabled={pending}>
+        <button type="submit" className="btn w-full btn-primary" disabled={pending || !mockEnabled}>
           {pending && <span aria-hidden="true" className="loading loading-sm loading-spinner" />}
-          {pending ? '로그인 중…' : '로그인'}
+          {!mockEnabled ? '로그인 준비 중' : pending ? '로그인 중…' : '로그인'}
         </button>
       </form>
       <p className="mt-6 text-center text-sm text-base-content/70">

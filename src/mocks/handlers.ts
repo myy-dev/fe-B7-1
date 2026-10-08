@@ -162,6 +162,11 @@ async function adminFailure(section: string) {
 let chatStore = makeChatStore();
 let sendFailures = new Set<string>();
 let deleteFailures = new Set<string>();
+let signupUsernames = new Set(['duck', 'taken']);
+
+export function resetAuthMocks() {
+  signupUsernames = new Set(['duck', 'taken']);
+}
 
 function makeChatStore() {
   const items =
@@ -370,20 +375,7 @@ export const handlers = [
         : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
     return HttpResponse.json(message, { status: 201 });
   }),
-  // 회원 API 상세 명세가 확정되기 전의 임시 계약. 실제 계정·토큰은 생성하지 않는다.
-  http.get(`${API_BASE_URL}/api/v1/users/check-username`, async ({ request }) => {
-    const username = new URL(request.url).searchParams.get('username')?.trim();
-    await delay(600);
-    if (!username)
-      return HttpResponse.json({ message: '아이디를 입력해 주세요.' }, { status: 422 });
-    if (username === 'error') {
-      return HttpResponse.json(
-        { message: '확인하지 못했어요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ available: !['duck', 'taken'].includes(username) });
-  }),
+  // 로그인은 아직 서버에 없는 퍼블리싱용 임시 계약이다.
   http.post(`${API_BASE_URL}/api/v1/auth/login`, async ({ request }) => {
     const { username, password } = (await request.json()) as {
       username?: string;
@@ -408,24 +400,35 @@ export const handlers = [
     return HttpResponse.json({ message: '로그인 미리보기 완료' });
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/signup`, async ({ request }) => {
-    const { name, username, password } = (await request.json()) as {
-      name?: string;
-      username?: string;
-      password?: string;
-    };
+    const body = (await request.json()) as Record<string, unknown> | null;
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    const username = typeof body?.username === 'string' ? body.username : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
     await delay(600);
-    if (!name?.trim() || !username?.trim() || !password?.trim()) {
-      return HttpResponse.json({ message: '필수 정보를 입력해 주세요.' }, { status: 422 });
-    }
-    if (['duck', 'taken'].includes(username)) {
-      return HttpResponse.json({ message: '이미 사용 중인 아이디예요.' }, { status: 409 });
-    }
-    if (username === 'signup-error') {
-      return HttpResponse.json(
-        { message: '가입 요청을 처리하지 못했어요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ message: '가입 미리보기 완료' }, { status: 201 });
+    if (
+      !name ||
+      [...name].length > 50 ||
+      username.length < 4 ||
+      username.length > 20 ||
+      /[^a-zA-Z0-9_]/.test(username) ||
+      [...password].length < 8 ||
+      [...password].length > 128 ||
+      !body ||
+      Object.keys(body).some((key) => !['name', 'username', 'password'].includes(key))
+    )
+      return chatError('INVALID_INPUT', '입력값을 확인해 주세요.', 422);
+
+    const normalizedUsername = username.toLowerCase();
+    if (signupUsernames.has(normalizedUsername))
+      return chatError('USERNAME_TAKEN', '이미 사용 중인 아이디입니다.', 409);
+    if (normalizedUsername === 'signup_error')
+      return chatError('INTERNAL_ERROR', '가입 요청을 처리하지 못했어요. 다시 시도해 주세요.', 500);
+
+    const id = signupUsernames.size + 1;
+    signupUsernames.add(normalizedUsername);
+    return HttpResponse.json(
+      { id, username: normalizedUsername, name, created_at: new Date().toISOString() },
+      { status: 201 },
+    );
   }),
 ];

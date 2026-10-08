@@ -68,6 +68,25 @@ async function openDelete(user: ReturnType<typeof userEvent.setup>, name = first
 }
 
 describe('대화 삭제', () => {
+  it('실제 API 모드에서 미구현 삭제 요청을 보내지 않는다', async () => {
+    vi.stubEnv('VITE_ENABLE_MSW', 'false');
+    let calls = 0;
+    server.use(
+      http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, () => {
+        calls++;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = renderPage();
+    const button = await screen.findByRole('button', { name: firstDelete });
+    expect(button).toBeDisabled();
+    expect(button).toHaveAttribute('title', '대화 삭제 준비 중');
+    await user.click(button);
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(calls).toBe(0);
+    expect(screen.getByRole('link', { name: '10월 5일 오후 12:00 대화' })).toBeInTheDocument();
+  });
+
   it('개발 모드의 반복 effect 실행에서도 확인창을 유지한다', async () => {
     const user = renderPage('/chats', true);
     const dialog = await openDelete(user);

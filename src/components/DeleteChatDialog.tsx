@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, apiRequest } from '../lib/api';
+import { ApiError, apiRequest, isMockEnabled } from '../lib/api';
 import { formatChatTime, type ChatSession } from '../lib/chats';
 
 interface DeleteChatDialogProps {
@@ -26,7 +26,7 @@ export default function DeleteChatDialog({ session, onDeleted, onClose }: Delete
   }
 
   async function deleteChat() {
-    if (request.current) return;
+    if (request.current || !isMockEnabled()) return;
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
@@ -97,7 +97,7 @@ export default function DeleteChatDialog({ session, onDeleted, onClose }: Delete
           <button
             type="button"
             className="btn btn-error"
-            disabled={pending}
+            disabled={pending || !isMockEnabled()}
             onClick={() => void deleteChat()}
           >
             {pending && <span aria-hidden="true" className="loading loading-sm loading-spinner" />}

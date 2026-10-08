@@ -4,7 +4,7 @@ import ChatMessages from '../components/ChatMessages';
 import DeleteChatDialog from '../components/DeleteChatDialog';
 import DuckAvatar from '../components/DuckAvatar';
 import NewChatButton from '../components/NewChatButton';
-import { ApiError, apiRequest } from '../lib/api';
+import { ApiError, apiRequest, isMockEnabled } from '../lib/api';
 import {
   formatChatTime,
   sortSessions,
@@ -175,6 +175,8 @@ function SessionList({
                   type="button"
                   className="btn btn-square shrink-0 btn-ghost text-base-content/60 btn-sm hover:text-error"
                   aria-label={`${formatChatTime(session.created_at)} 대화 삭제`}
+                  disabled={!isMockEnabled()}
+                  title={!isMockEnabled() ? '대화 삭제 준비 중' : undefined}
                   onClick={() => onDelete(session)}
                 >
                   <svg
