@@ -5,12 +5,25 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'http://localh
 
 export class ApiError extends Error {
   readonly status: number;
+  readonly code: string | null;
+  readonly requestId: string | null;
 
-  constructor(status: number, message: string) {
+  constructor(
+    status: number,
+    message: string,
+    code: string | null = null,
+    requestId: string | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
+    this.code = code;
+    this.requestId = requestId;
   }
+}
+
+export function isMockEnabled(): boolean {
+  return import.meta.env.VITE_ENABLE_MSW === 'true';
 }
 
 function getErrorMessage(body: unknown, status: number): string {
@@ -35,7 +48,22 @@ export async function apiRequest<T = unknown>(path: string, options: RequestInit
 
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
-    throw new ApiError(response.status, getErrorMessage(body, response.status));
+    const error = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
+    const code =
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      typeof error.code === 'string'
+        ? error.code
+        : null;
+    const requestId =
+      typeof error === 'object' &&
+      error !== null &&
+      'request_id' in error &&
+      typeof error.request_id === 'string'
+        ? error.request_id
+        : null;
+    throw new ApiError(response.status, getErrorMessage(body, response.status), code, requestId);
   }
 
   if (response.status === 204) return undefined as T;
