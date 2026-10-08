@@ -13,8 +13,11 @@ export default function AdminLayout() {
         본문으로 건너뛰기
       </a>
       <header className="border-b border-base-300 bg-base-100">
-        <nav aria-label="관리자 서비스 이동" className="navbar min-h-20 justify-between gap-4 px-5">
-          <Link to="/admin/users" className="text-lg font-bold">
+        <nav
+          aria-label="관리자 서비스 이동"
+          className="navbar min-h-20 flex-wrap justify-between gap-4 px-5"
+        >
+          <Link to="/admin/users" className="text-lg font-bold whitespace-nowrap">
             꽥꽥이 관리자
           </Link>
           <div className="flex items-center gap-2">

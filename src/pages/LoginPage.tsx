@@ -12,9 +12,23 @@ export default function LoginPage() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const [errors, setErrors] = useState({ username: '', password: '' });
+  const [signupComplete, setSignupComplete] = useState(location.state?.signupComplete === true);
   const request = useRef<AbortController | null>(null);
 
   useEffect(() => () => request.current?.abort(), []);
+
+  useEffect(() => {
+    if (location.state?.signupComplete !== true) return;
+    const state = { ...location.state };
+    delete state.signupComplete;
+    navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state });
+  }, [location, navigate]);
+
+  useEffect(() => {
+    if (!signupComplete) return;
+    const timer = window.setTimeout(() => setSignupComplete(false), 5000);
+    return () => window.clearTimeout(timer);
+  }, [signupComplete]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -72,10 +86,30 @@ export default function LoginPage() {
       <h1 id="login-title" className="text-2xl font-bold">
         로그인
       </h1>
-      {location.state?.signupComplete === true && (
-        <p role="status" className="mt-5 alert text-sm alert-success">
-          회원가입 완료
-        </p>
+      {signupComplete && (
+        <div className="toast toast-center toast-top z-50 w-max max-w-full px-4">
+          <div role="status" className="alert text-sm alert-success shadow-lg">
+            <span>회원가입 완료</span>
+            <button
+              type="button"
+              aria-label="회원가입 완료 알림 닫기"
+              className="btn btn-circle btn-ghost btn-xs"
+              onClick={() => setSignupComplete(false)}
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                className="size-4"
+              >
+                <path d="m6 6 12 12M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
+        </div>
       )}
       <form noValidate onSubmit={handleSubmit} aria-busy={pending} className="mt-6 space-y-5">
         <div className="fieldset p-0">
