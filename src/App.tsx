@@ -12,6 +12,7 @@ import AdminSessionPage from './pages/AdminSessionPage';
 import AdminLogsPage from './pages/AdminLogsPage';
 import AdminSystemLogsPage from './pages/AdminSystemLogsPage';
 import AuthProvider from './components/AuthProvider';
+import { useAuth } from './lib/auth';
 
 export default function App() {
   return (
@@ -27,7 +28,7 @@ export default function App() {
           <Route path="*" element={<NotFoundPage />} />
         </Route>
         <Route element={<AppLayout />}>
-          <Route path="/" element={<Navigate to="/chats" replace />} />
+          <Route path="/" element={<StartPage />} />
           <Route path="/chats" element={<ChatPage />} />
           <Route path="/chats/:chatId" element={<ChatPage />} />
           <Route element={<AuthLayout />}>
@@ -39,4 +40,9 @@ export default function App() {
       </Routes>
     </AuthProvider>
   );
+}
+
+function StartPage() {
+  const { session } = useAuth();
+  return <Navigate to={session ? '/chats' : '/login'} replace />;
 }

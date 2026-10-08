@@ -1,7 +1,10 @@
-import { Outlet } from 'react-router';
+import { Navigate, Outlet } from 'react-router';
 import DuckAvatar from '../components/DuckAvatar';
+import { useAuth } from '../lib/auth';
 
 export default function AuthLayout() {
+  const { session } = useAuth();
+  if (session) return <Navigate to="/chats" replace />;
   return (
     <div className="grid w-full max-w-4xl items-center gap-8 lg:grid-cols-2 lg:gap-16">
       <div className="text-center lg:text-left">
