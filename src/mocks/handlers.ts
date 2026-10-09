@@ -326,7 +326,6 @@ export const handlers = [
       ? HttpResponse.json(chat)
       : chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
   }),
-  // 삭제 API 명세 확정 전의 임시 계약: DELETE /chats/:chatId, 성공 204.
   http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
     const error = authenticationError(request);
     if (error) return error;

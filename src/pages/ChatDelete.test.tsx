@@ -10,7 +10,7 @@ import type { ChatDetail, ChatSession } from '../lib/chats';
 import { resetChatMocks } from '../mocks/handlers';
 import { server } from '../mocks/server';
 import { createMockLoginResponse } from '../mocks/handlers';
-import { signIn } from '../lib/auth';
+import { getAccessToken, signIn } from '../lib/auth';
 
 beforeEach(() => signIn(createMockLoginResponse()));
 
@@ -72,23 +72,44 @@ async function openDelete(user: ReturnType<typeof userEvent.setup>, name = first
 }
 
 describe('대화 삭제', () => {
-  it('실제 API 모드에서 미구현 삭제 요청을 보내지 않는다', async () => {
-    vi.stubEnv('VITE_ENABLE_MSW', 'false');
+  beforeEach(() => vi.stubEnv('VITE_ENABLE_MSW', 'false'));
+
+  it('실제 API 모드에서 Bearer 토큰으로 삭제하고 204 응답을 반영한다', async () => {
     let calls = 0;
+    let authorization: string | null = null;
     server.use(
-      http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, () => {
+      http.delete(`${API_BASE_URL}/api/v1/chats/${firstId}`, ({ request }) => {
         calls++;
+        authorization = request.headers.get('Authorization');
         return new HttpResponse(null, { status: 204 });
       }),
     );
     const user = renderPage();
-    const button = await screen.findByRole('button', { name: firstDelete });
-    expect(button).toBeDisabled();
-    expect(button).toHaveAttribute('title', '대화 삭제 준비 중');
-    await user.click(button);
+    const dialog = await openDelete(user);
+    await user.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls).toBe(1);
+    expect(authorization).toBe(`Bearer ${getAccessToken()}`);
+    expect(
+      screen.queryByRole('link', { name: '10월 5일 오후 12:00 대화' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('삭제 요청의 401 응답에서 인증을 정리하고 로그인 화면으로 이동한다', async () => {
+    server.use(
+      http.delete(`${API_BASE_URL}/api/v1/chats/${firstId}`, () =>
+        HttpResponse.json(
+          { error: { code: 'UNAUTHORIZED', message: '로그인이 필요합니다.' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    const user = renderPage(`/chats/${firstId}`);
+    const dialog = await openDelete(user);
+    await user.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/login'));
+    expect(getAccessToken()).toBeNull();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(calls).toBe(0);
-    expect(screen.getByRole('link', { name: '10월 5일 오후 12:00 대화' })).toBeInTheDocument();
   });
 
   it('개발 모드의 반복 effect 실행에서도 확인창을 유지한다', async () => {
@@ -313,7 +334,7 @@ describe('대화 삭제', () => {
   });
 });
 
-describe('삭제 MSW 임시 계약', () => {
+describe('삭제 API 모킹 계약', () => {
   it('204로 삭제 후 목록·상세·전송에서도 제거되고 재삭제는 404다', async () => {
     await expect(
       apiRequest(`/api/v1/chats/${firstId}`, { method: 'DELETE' }),
