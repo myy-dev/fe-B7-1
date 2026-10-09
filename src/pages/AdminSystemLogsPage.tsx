@@ -42,7 +42,7 @@ export default function AdminSystemLogsPage() {
                   <th>레벨</th>
                   <th>이벤트</th>
                   <th>요청 ID</th>
-                  <th>회원 ID</th>
+                  <th>회원 번호(PK)</th>
                 </tr>
               </thead>
               <tbody>

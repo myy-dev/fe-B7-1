@@ -21,7 +21,9 @@ export default function AdminSessionPage() {
           </li>
           {resource.data && (
             <li>
-              <Link to={`/admin/users/${resource.data.user_id}`}>회원 {resource.data.user_id}</Link>
+              <Link to={`/admin/users/${resource.data.user_id}`}>
+                회원 번호(PK) {resource.data.user_id}
+              </Link>
             </li>
           )}
           <li>세션 상세</li>
@@ -49,7 +51,7 @@ export default function AdminSessionPage() {
             {resource.data.messages.length ? (
               <ChatMessages
                 messages={resource.data.messages}
-                questionAuthor={`회원 ${resource.data.user_id}`}
+                questionAuthor={`회원 번호(PK) ${resource.data.user_id}`}
               />
             ) : (
               <p role="status" className="py-8 text-center text-base-content/70">

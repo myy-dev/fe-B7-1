@@ -19,7 +19,7 @@ export default function AdminUsersPage() {
             <AdminTable label="회원 목록 표">
               <thead>
                 <tr>
-                  <th>ID</th>
+                  <th>회원 번호(PK)</th>
                   <th>이름</th>
                   <th>아이디</th>
                   <th>권한</th>
