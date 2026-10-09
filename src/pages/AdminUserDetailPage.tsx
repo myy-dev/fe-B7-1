@@ -9,6 +9,7 @@ import {
   type AdminUserDetail,
 } from '../lib/admin';
 import useAdminResource from '../lib/useAdminResource';
+import AdminRoleControl from '../components/AdminRoleControl';
 
 export default function AdminUserDetailPage() {
   const { userId } = useParams();
@@ -65,6 +66,7 @@ export default function AdminUserDetailPage() {
                   <dd className="mt-1">{formatAdminTime(user.data.last_login_at)}</dd>
                 </div>
               </dl>
+              <AdminRoleControl key={`${user.data.id}:${user.data.role}`} member={user.data} />
             </div>
           </section>
           <h2 className="text-lg font-bold">대화 세션</h2>

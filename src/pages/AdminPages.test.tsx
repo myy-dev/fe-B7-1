@@ -143,7 +143,13 @@ describe('관리자 회원·세션 조회', () => {
           return HttpResponse.json({ error: { message: '회원 조회 실패' } }, { status: 500 });
         return HttpResponse.json({
           items: [
-            { id: 99, name: '재시도 회원', username: 'retry', created_at: '2026-10-05T03:00:00Z' },
+            {
+              id: 99,
+              name: '재시도 회원',
+              username: 'retry',
+              role: 'user',
+              created_at: '2026-10-05T03:00:00Z',
+            },
           ],
           total: 1,
           page: 1,
@@ -172,6 +178,7 @@ describe('관리자 회원·세션 조회', () => {
           id: 1,
           name: '이전 회원',
           username: 'old',
+          role: 'user',
           created_at: '2026-10-05T03:00:00Z',
           last_login_at: null,
         });
