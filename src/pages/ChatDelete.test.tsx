@@ -183,7 +183,7 @@ describe('대화 삭제', () => {
     const user = renderPage();
     await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     await screen.findByRole('textbox', { name: '메시지' });
-    await user.click(screen.getByRole('link', { name: '처음 화면' }));
+    await user.click(screen.getByRole('link', { name: '꽥꽥이 처음 화면' }));
     const button = screen.getByRole('button', { name: /대화 삭제$/ });
     await user.click(button);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }));

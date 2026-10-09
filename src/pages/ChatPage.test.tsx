@@ -305,6 +305,48 @@ describe('채팅 MSW 계약', () => {
 });
 
 describe('질문 전송', () => {
+  it('1,000자를 넘는 붙여넣기를 자르고 추가 입력을 막으며 삭제 후 다시 입력할 수 있다', async () => {
+    const user = renderPage(`/chats/${emptyId}`);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    await user.click(input);
+    await user.paste('가'.repeat(1005));
+    expect(input).toHaveValue('가'.repeat(1000));
+    expect(input).toHaveAccessibleDescription('1,000 / 1,000');
+    await user.keyboard('더');
+    expect(input).toHaveValue('가'.repeat(1000));
+    await user.keyboard('{Backspace}나');
+    expect(input).toHaveValue(`${'가'.repeat(999)}나`);
+  });
+
+  it('제한 길이의 질문을 전송하고 성공하면 입력과 글자 수를 초기화한다', async () => {
+    let payload: unknown;
+    const question = '가'.repeat(1000);
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+        payload = await request.json();
+        return HttpResponse.json({
+          request_id: 'limited-question',
+          chat_id: emptyId,
+          question,
+          answer: '질문을 받았어요.',
+          status: 'completed',
+          error_code: null,
+          created_at: '2026-10-05T03:00:00Z',
+          finished_at: '2026-10-05T03:00:01Z',
+        });
+      }),
+    );
+    const user = renderPage(`/chats/${emptyId}`);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    await user.click(input);
+    await user.paste(`${question}초과`);
+    await user.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('질문을 받았어요.');
+    expect(payload).toEqual({ question });
+    expect(input).toHaveValue('');
+    expect(input).toHaveAccessibleDescription('0 / 1,000');
+  });
+
   it('새 대화에서 공백을 막고 한 번 전송한 질문과 답변을 저장·조회한다', async () => {
     const user = renderPage();
     await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
@@ -435,16 +477,16 @@ describe('질문 전송', () => {
     expect(input).toHaveValue('');
   });
 
-  it('느린 응답에 대기 안내를 표시하고 성공 후 정리한다', async () => {
+  it('느린 응답에도 생성 중 표시와 입력 잠금을 유지하고 성공 후 정리한다', async () => {
     vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'slow');
     const user = renderPage(`/chats/${emptyId}`);
     const input = await screen.findByRole('textbox', { name: '메시지' }, { timeout: 2500 });
     await user.type(input, '천천히 답해 줘');
     await user.click(screen.getByRole('button', { name: '보내기' }));
-    await screen.findByText('답변을 기다리고 있어요.', {}, { timeout: 2500 });
+    expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
     expect(input).toBeDisabled();
-    await screen.findByText(/이야기해 줘서 고마워요/, {}, { timeout: 2500 });
-    expect(screen.queryByText('답변을 기다리고 있어요.')).not.toBeInTheDocument();
+    await screen.findByText(/이야기해 줘서 고마워요/, {}, { timeout: 4500 });
+    expect(screen.queryByText('답변 생성 중')).not.toBeInTheDocument();
     expect(input).toBeEnabled();
   }, 10000);
 
