@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Link, NavLink, useNavigate, useParams } from 'react-router';
 import ChatMessages from '../components/ChatMessages';
 import DeleteChatDialog from '../components/DeleteChatDialog';
@@ -21,6 +21,15 @@ type SessionListState = {
   items: ChatSession[];
   error: string;
 };
+
+const maxQuestionLength = 1000;
+
+function resizeQuestionInput(element: HTMLTextAreaElement | null) {
+  if (!element) return;
+  element.style.height = 'auto';
+  const borderHeight = element.offsetHeight - element.clientHeight;
+  element.style.height = `${element.scrollHeight + borderHeight}px`;
+}
 
 export default function ChatPage() {
   const { session } = useAuth();
@@ -123,9 +132,6 @@ function ChatWorkspace() {
           <div className="max-h-40 overflow-y-auto lg:max-h-none lg:min-h-0 lg:flex-1">
             <SessionList list={list} onRetry={retryList} onDelete={setDeleteTarget} />
           </div>
-          <Link to="/chats" className="link text-center text-sm text-base-content/70">
-            처음 화면
-          </Link>
         </div>
       </aside>
       {chatId ? <ChatDetailView key={chatId} chatId={chatId} /> : <HomePage />}
@@ -222,7 +228,6 @@ function ChatDetailView({ chatId }: { chatId: string }) {
   const [sending, setSending] = useState(false);
   const [outgoing, setOutgoing] = useState<ChatMessage | null>(null);
   const [sendError, setSendError] = useState('');
-  const [delayed, setDelayed] = useState(false);
   const sendRequest = useRef<AbortController | null>(null);
   const composing = useRef(false);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -230,15 +235,19 @@ function ChatDetailView({ chatId }: { chatId: string }) {
 
   useEffect(() => () => sendRequest.current?.abort(), []);
 
+  useLayoutEffect(() => {
+    resizeQuestionInput(input.current);
+  }, [draft, sending, state.status]);
+
   useEffect(() => {
-    if (!outgoing) return;
-    const timer = window.setTimeout(() => setDelayed(true), 2000);
-    return () => window.clearTimeout(timer);
-  }, [outgoing]);
+    const resize = () => resizeQuestionInput(input.current);
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, []);
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [state.detail?.messages, outgoing, delayed]);
+  }, [state.detail?.messages, outgoing]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -275,7 +284,6 @@ function ChatDetailView({ chatId }: { chatId: string }) {
     sendRequest.current = controller;
     setSending(true);
     setSendError('');
-    setDelayed(false);
     // 전송 중 화면 표시용 상태이며, 저장된 기록은 API 응답만 반영한다.
     setOutgoing({
       request_id: crypto.randomUUID(),
@@ -329,7 +337,6 @@ function ChatDetailView({ chatId }: { chatId: string }) {
         sendRequest.current = null;
         setSending(false);
         setOutgoing(null);
-        setDelayed(false);
         // 비활성 입력이 다시 렌더링된 뒤 포커스를 돌려준다.
         window.requestAnimationFrame(() => input.current?.focus());
       }
@@ -400,11 +407,6 @@ function ChatDetailView({ chatId }: { chatId: string }) {
                 </div>
               )}
             </div>
-            {delayed && outgoing && (
-              <p role="status" className="shrink-0 text-sm text-base-content/70">
-                답변을 기다리고 있어요.
-              </p>
-            )}
             {sendError && (
               <p role="alert" className="alert shrink-0 text-sm alert-error">
                 {sendError}
@@ -412,60 +414,67 @@ function ChatDetailView({ chatId }: { chatId: string }) {
             )}
             <form
               aria-label="메시지 전송"
-              className="mt-auto flex min-w-0 shrink-0 items-end gap-2 border-t border-base-300 pt-4"
+              className="mt-auto flex min-w-0 shrink-0 flex-col gap-2 border-t border-base-300 pt-4"
               onSubmit={(event) => {
                 event.preventDefault();
                 void sendQuestion();
               }}
             >
-              <label htmlFor="chat-question" className="sr-only">
-                메시지
-              </label>
-              <textarea
-                ref={input}
-                id="chat-question"
-                className="textarea min-h-12 min-w-0 flex-1 resize-y bg-base-100 lg:max-h-[25dvh]"
-                rows={2}
-                placeholder="꽥꽥이에게 이야기해 보세요"
-                value={draft}
-                disabled={sending}
-                onChange={(event) => {
-                  setDraft(event.target.value);
-                  setSendError('');
-                }}
-                onCompositionStart={() => {
-                  composing.current = true;
-                }}
-                onCompositionEnd={() => {
-                  composing.current = false;
-                }}
-                onKeyDown={(event) => {
-                  if (
-                    event.key !== 'Enter' ||
-                    event.shiftKey ||
-                    composing.current ||
-                    event.nativeEvent.isComposing ||
-                    event.keyCode === 229
-                  )
-                    return;
-                  event.preventDefault();
-                  if (!event.repeat) void sendQuestion();
-                }}
-              />
-              <button
-                type="submit"
-                className="btn shrink-0 btn-primary"
-                disabled={!draft.trim() || sending}
-              >
-                {sending ? (
-                  <>
-                    <span aria-hidden="true" className="loading loading-sm loading-spinner" />
-                    전송 중…
-                  </>
-                ) : (
-                  '보내기'
-                )}
-              </button>
+              <div className="flex min-w-0 items-end gap-2">
+                <label htmlFor="chat-question" className="sr-only">
+                  메시지
+                </label>
+                <textarea
+                  ref={input}
+                  id="chat-question"
+                  className="textarea max-h-[min(25dvh,14rem)] min-h-12 min-w-0 flex-1 resize-none overflow-y-auto bg-base-100"
+                  rows={1}
+                  maxLength={maxQuestionLength}
+                  aria-describedby="chat-question-count"
+                  placeholder="꽥꽥이에게 이야기해 보세요"
+                  value={draft}
+                  disabled={sending}
+                  onChange={(event) => {
+                    setDraft(event.target.value.slice(0, maxQuestionLength));
+                    setSendError('');
+                  }}
+                  onCompositionStart={() => {
+                    composing.current = true;
+                  }}
+                  onCompositionEnd={() => {
+                    composing.current = false;
+                  }}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key !== 'Enter' ||
+                      event.shiftKey ||
+                      composing.current ||
+                      event.nativeEvent.isComposing ||
+                      event.keyCode === 229
+                    )
+                      return;
+                    event.preventDefault();
+                    if (!event.repeat) void sendQuestion();
+                  }}
+                />
+                <button
+                  type="submit"
+                  className="btn shrink-0 btn-primary"
+                  disabled={!draft.trim() || sending}
+                >
+                  {sending ? (
+                    <>
+                      <span aria-hidden="true" className="loading loading-sm loading-spinner" />
+                      전송 중…
+                    </>
+                  ) : (
+                    '보내기'
+                  )}
+                </button>
+              </div>
+              <p id="chat-question-count" className="text-right text-xs text-base-content/60">
+                {draft.length.toLocaleString('ko-KR')} / 1,000
+              </p>
             </form>
           </>
         )}

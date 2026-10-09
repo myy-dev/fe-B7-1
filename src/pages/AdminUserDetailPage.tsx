@@ -50,7 +50,7 @@ export default function AdminUserDetailPage() {
               </div>
               <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
-                  <dt className="text-sm text-base-content/60">회원 ID</dt>
+                  <dt className="text-sm text-base-content/60">회원 번호(PK)</dt>
                   <dd className="mt-1">{user.data.id}</dd>
                 </div>
                 <div>

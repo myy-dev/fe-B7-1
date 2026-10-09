@@ -198,7 +198,7 @@ describe('API 요청과 MSW 연동', () => {
     const options = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
     const user = await apiRequest('/api/v1/auth/signup', {
       ...options,
-      body: JSON.stringify({ name: ' 오리 친구 ', username: 'New_User', password: ' password ' }),
+      body: JSON.stringify({ name: ' 오리 친구 ', username: 'New_User', password: 'Password123!' }),
     });
     expect(user).toEqual({
       id: expect.any(Number),
@@ -209,7 +209,7 @@ describe('API 요청과 MSW 연동', () => {
     await expect(
       apiRequest('/api/v1/auth/signup', {
         ...options,
-        body: JSON.stringify({ name: '친구', username: 'NEW_USER', password: 'password' }),
+        body: JSON.stringify({ name: '친구', username: 'NEW_USER', password: 'Password123!' }),
       }),
     ).rejects.toMatchObject({ status: 409, code: 'USERNAME_TAKEN' });
   });
@@ -222,7 +222,7 @@ describe('API 요청과 MSW 연동', () => {
         body: JSON.stringify({
           name: '친구',
           username: 'new_user',
-          password: 'password',
+          password: 'Password123!',
           role: 'admin',
         }),
       }),

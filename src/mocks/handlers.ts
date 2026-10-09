@@ -1,6 +1,7 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
 import type { CurrentUser, LoginResponse } from '../lib/auth';
+import { isValidSignupPassword } from '../lib/auth';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
 import {
   dateRangeError,
@@ -521,8 +522,7 @@ export const handlers = [
       username.length < 4 ||
       username.length > 20 ||
       /[^a-zA-Z0-9_]/.test(username) ||
-      [...password].length < 8 ||
-      [...password].length > 128 ||
+      !isValidSignupPassword(password) ||
       !body ||
       Object.keys(body).some((key) => !['name', 'username', 'password'].includes(key))
     )

@@ -1,5 +1,16 @@
 import { createContext, useContext } from 'react';
 
+export function isValidSignupPassword(password: string): boolean {
+  return (
+    password.length >= 8 &&
+    password.length <= 128 &&
+    !/[^!-~]/.test(password) &&
+    /[a-zA-Z]/.test(password) &&
+    /[0-9]/.test(password) &&
+    /[!-/:-@[-`{-~]/.test(password)
+  );
+}
+
 export interface LoginResponse {
   access_token: string;
   token_type: string;

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { ApiError, apiRequest } from '../lib/api';
+import { isValidSignupPassword } from '../lib/auth';
 
 export default function SignupPage() {
   const navigate = useNavigate();
@@ -42,8 +43,8 @@ export default function SignupPage() {
           : '',
       password: !password
         ? '비밀번호를 입력해 주세요.'
-        : [...password].length < 8 || [...password].length > 128
-          ? '비밀번호는 8~128자로 입력해 주세요.'
+        : !isValidSignupPassword(password)
+          ? '비밀번호는 영문·숫자·특수문자를 포함한 8~128자로, 공백 없이 입력해 주세요.'
           : '',
       passwordConfirm: !passwordConfirm
         ? '비밀번호 확인을 입력해 주세요.'
@@ -132,16 +133,16 @@ export default function SignupPage() {
               placeholder="아이디를 입력해 주세요"
               disabled={pending}
               aria-invalid={Boolean(errors.username)}
-              aria-describedby={errors.username ? 'signup-username-error' : undefined}
+              aria-describedby="signup-username-help"
               onChange={(event) => changeUsername(event.target.value)}
             />
           </div>
           <p
-            id="signup-username-error"
+            id="signup-username-help"
             role={errors.username ? 'alert' : undefined}
-            className="text-error"
+            className={errors.username ? 'text-error' : 'text-base-content/70'}
           >
-            {errors.username}
+            {errors.username || '영문·숫자·밑줄(_)만 사용, 4~20자(공백 불가)'}
           </p>
         </div>
         <div className="fieldset p-0">
@@ -159,18 +160,20 @@ export default function SignupPage() {
             placeholder="비밀번호를 입력해 주세요"
             disabled={pending}
             aria-invalid={Boolean(errors.password)}
-            aria-describedby={errors.password ? 'signup-password-error' : undefined}
+            aria-describedby="signup-password-help"
             onChange={(event) => {
               setPassword(event.target.value);
               setErrors((current) => ({ ...current, password: '', passwordConfirm: '' }));
               setError('');
             }}
           />
-          {errors.password && (
-            <p id="signup-password-error" role="alert" className="text-error">
-              {errors.password}
-            </p>
-          )}
+          <p
+            id="signup-password-help"
+            role={errors.password ? 'alert' : undefined}
+            className={errors.password ? 'text-error' : 'text-base-content/70'}
+          >
+            {errors.password || '영문·숫자·특수문자 포함 8자 이상(공백 불가)'}
+          </p>
         </div>
         <div className="fieldset p-0">
           <label htmlFor="signup-password-confirm" className="fieldset-label text-base-content">
