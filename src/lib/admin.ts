@@ -1,4 +1,5 @@
 import type { ChatMessage } from './chats';
+import type { CurrentUser } from './auth';
 
 export interface AdminPage<T> {
   items: T[];
@@ -11,6 +12,7 @@ export interface AdminUser {
   id: number;
   username: string;
   name: string;
+  role: CurrentUser['role'];
   created_at: string;
 }
 

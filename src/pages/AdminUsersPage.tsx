@@ -2,6 +2,7 @@ import { Link, useSearchParams } from 'react-router';
 import { AdminPagination, AdminStatus, AdminTable } from '../components/AdminControls';
 import { adminQuery, formatAdminTime, type AdminPage, type AdminUser } from '../lib/admin';
 import useAdminResource from '../lib/useAdminResource';
+import AdminRoleBadge from '../components/AdminRoleBadge';
 
 export default function AdminUsersPage() {
   const [search] = useSearchParams();
@@ -21,6 +22,7 @@ export default function AdminUsersPage() {
                   <th>ID</th>
                   <th>이름</th>
                   <th>아이디</th>
+                  <th>권한</th>
                   <th>가입 시각 (KST)</th>
                   <th>상세</th>
                 </tr>
@@ -31,6 +33,9 @@ export default function AdminUsersPage() {
                     <td>{user.id}</td>
                     <td>{user.name}</td>
                     <td>{user.username}</td>
+                    <td>
+                      <AdminRoleBadge role={user.role} />
+                    </td>
                     <td className="whitespace-nowrap">
                       <time dateTime={user.created_at}>{formatAdminTime(user.created_at)}</time>
                     </td>

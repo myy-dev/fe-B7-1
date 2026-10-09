@@ -82,13 +82,15 @@ const exampleChats: ChatDetail[] = [
   },
 ];
 
-const adminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => ({
+const exampleAdminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => ({
   id: index + 1,
   username: index === 0 ? 'user_a' : index === 1 ? 'user_b' : `user_${index + 1}`,
   name: index === 0 ? '사용자A' : index === 1 ? '사용자B' : `사용자 ${index + 1}`,
+  role: index === 0 || index === 3 ? 'admin' : 'user',
   created_at: new Date(Date.UTC(2026, 8, 30 - index, 3)).toISOString(),
   last_login_at: index % 2 === 0 ? '2026-10-05T03:00:00Z' : null,
 }));
+let adminUsers = structuredClone(exampleAdminUsers);
 
 const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
   const event = ['request_received', 'ai_call_succeeded', 'ai_call_failed', 'user_login_failed'][
@@ -188,7 +190,7 @@ function authenticationError(request: Request) {
 function adminAuthenticationError(request: Request) {
   const unauthorized = authenticationError(request);
   if (unauthorized) return unauthorized;
-  return request.headers.get('Authorization')!.endsWith('.admin')
+  return mockCurrentUser(request).role === 'admin'
     ? null
     : chatError('FORBIDDEN', '관리자 권한이 필요합니다.', 403);
 }
@@ -199,7 +201,7 @@ function mockCurrentUser(request: Request): CurrentUser {
     id: admin ? 1 : 2,
     username: admin ? 'admin' : 'friend',
     name: admin ? '관리자' : '오리 친구',
-    role: admin ? 'admin' : 'user',
+    role: adminUsers.find((member) => member.id === (admin ? 1 : 2))!.role,
     created_at: '2026-10-05T03:00:00Z',
     last_login_at: '2026-10-09T03:00:00Z',
   };
@@ -208,6 +210,7 @@ function mockCurrentUser(request: Request): CurrentUser {
 export function resetAuthMocks() {
   signupUsernames = new Set(['duck', 'taken']);
   revokedTokens.clear();
+  adminUsers = structuredClone(exampleAdminUsers);
 }
 
 function makeChatStore() {
@@ -240,7 +243,13 @@ export const handlers = [
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     return adminPage(
-      adminUsers.map(({ id, username, name, created_at }) => ({ id, username, name, created_at })),
+      adminUsers.map(({ id, username, name, role, created_at }) => ({
+        id,
+        username,
+        name,
+        role,
+        created_at,
+      })),
       query.page,
       query.size,
     );
@@ -256,6 +265,30 @@ export const handlers = [
     return user
       ? HttpResponse.json(user)
       : chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
+  }),
+  http.patch(`${API_BASE_URL}/api/v1/admin/users/:userId/role`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
+    const id = positiveInteger(String(params.userId));
+    const body: unknown = await request.json().catch(() => null);
+    if (
+      !id ||
+      !body ||
+      typeof body !== 'object' ||
+      !('role' in body) ||
+      (body.role !== 'admin' && body.role !== 'user')
+    )
+      return chatError('INVALID_ROLE', '역할은 admin 또는 user만 지정할 수 있습니다.', 422);
+    if (id === mockCurrentUser(request).id && body.role !== 'admin')
+      return chatError('CANNOT_DEMOTE_SELF', '자기 자신의 관리자 권한은 해제할 수 없습니다.', 403);
+    await delay(import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'slow' ? 1500 : 300);
+    if (request.signal.aborted) return HttpResponse.error();
+    if (import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'role-error')
+      return chatError('DB_ERROR', '권한을 변경하지 못했어요. 다시 시도해 주세요.', 500);
+    const member = adminUsers.find((item) => item.id === id);
+    if (!member) return chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
+    member.role = body.role;
+    return HttpResponse.json({ id: member.id, username: member.username, role: member.role });
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/sessions`, async ({ request }) => {
     const unauthorized = adminAuthenticationError(request);
