@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL } from '../lib/api';
-import { getAuthSession, signIn } from '../lib/auth';
+import { getAuthSession, signIn, signOut } from '../lib/auth';
 import { createMockLoginResponse } from '../mocks/handlers';
 import { server } from '../mocks/server';
 
@@ -95,8 +95,19 @@ describe('로그인 세션과 채팅 인증', () => {
     expect(await screen.findByText(/이야기해 줘서 고마워요/)).toBeInTheDocument();
   });
 
-  it('로그아웃하면 토큰과 기존 대화 화면을 제거하고 재로그인 시 새 목록을 조회한다', async () => {
-    signIn(createMockLoginResponse());
+  it('실제 API 모드에서 서버 로그아웃 후 토큰과 대화를 정리하고 재로그인한다', async () => {
+    vi.stubEnv('VITE_ENABLE_MSW', 'false');
+    const response = createMockLoginResponse();
+    signIn(response);
+    let calls = 0;
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/logout`, async ({ request }) => {
+        calls++;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${response.access_token}`);
+        expect(await request.text()).toBe('');
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
     const user = renderPage(`/chats/${firstId}`);
     await screen.findByText('오늘 하루가 조금 지쳤어.');
     await user.click(screen.getByRole('button', { name: '로그아웃' }));
@@ -104,10 +115,121 @@ describe('로그인 세션과 채팅 인증', () => {
     expect(screen.queryByText('오늘 하루가 조금 지쳤어.')).not.toBeInTheDocument();
     expect(getAuthSession()).toBeNull();
     expect(sessionStorage.getItem('quackquack.auth')).toBeNull();
+    expect(calls).toBe(1);
     server.use(http.get(`${API_BASE_URL}/api/v1/chats`, () => HttpResponse.json({ items: [] })));
     await login(user);
     expect(await screen.findByText('아직 대화가 없어요.')).toBeInTheDocument();
     expect(screen.queryByRole('navigation', { name: '대화 목록' })).not.toBeInTheDocument();
+  });
+
+  it('관리자 화면에서도 서버 로그아웃 후 로그인으로 이동한다', async () => {
+    vi.stubEnv('VITE_ENABLE_MSW', 'false');
+    signIn(createMockLoginResponse());
+    const user = renderPage('/admin/users');
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(getAuthSession()).toBeNull();
+    expect(screen.queryByRole('navigation', { name: '관리자 메뉴' })).not.toBeInTheDocument();
+  });
+
+  it('로그아웃 요청 중에는 세션을 유지하고 중복 제출을 막는다', async () => {
+    signIn(createMockLoginResponse());
+    let calls = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/logout`, async () => {
+        calls++;
+        await gate;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = renderPage('/chats');
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    await waitFor(() => expect(calls).toBe(1));
+    const button = screen.getByRole('button', { name: '로그아웃 중…' });
+    expect(button).toBeDisabled();
+    await user.click(button);
+    expect(getAuthSession()).not.toBeNull();
+    expect(calls).toBe(1);
+    release();
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+  });
+
+  it.each(['server', 'network'])(
+    '로그아웃 %s 오류는 세션을 유지하며 재시도할 수 있다',
+    async (kind) => {
+      vi.stubEnv('VITE_ENABLE_MSW', 'false');
+      const response = createMockLoginResponse();
+      signIn(response);
+      let calls = 0;
+      server.use(
+        http.post(`${API_BASE_URL}/api/v1/auth/logout`, () => {
+          calls++;
+          if (calls > 1) return new HttpResponse(null, { status: 204 });
+          return kind === 'network'
+            ? HttpResponse.error()
+            : HttpResponse.json({ detail: '토큰을 폐기하지 못했습니다.' }, { status: 500 });
+        }),
+      );
+      const user = renderPage('/chats');
+      await screen.findByRole('navigation', { name: '대화 목록' });
+      await user.click(screen.getByRole('button', { name: '로그아웃' }));
+      expect(await screen.findByRole('alert')).toHaveTextContent(
+        kind === 'network' ? '로그아웃하지 못했어요.' : '토큰을 폐기하지 못했습니다.',
+      );
+      expect(getAuthSession()?.accessToken).toBe(response.access_token);
+      expect(sessionStorage.getItem('quackquack.auth')).not.toBeNull();
+      expect(screen.getByRole('navigation', { name: '대화 목록' })).toBeInTheDocument();
+      await user.click(screen.getByRole('button', { name: '로그아웃' }));
+      expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+      expect(calls).toBe(2);
+    },
+  );
+
+  it('로그아웃의 401도 세션을 정리하고 로그인으로 이동한다', async () => {
+    signIn(createMockLoginResponse());
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/logout`, () =>
+        HttpResponse.json({ detail: '로그인이 필요합니다.' }, { status: 401 }),
+      ),
+    );
+    const user = renderPage('/chats');
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(getAuthSession()).toBeNull();
+    expect(sessionStorage.getItem('quackquack.auth')).toBeNull();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('이전 로그아웃의 늦은 성공 응답이 새 로그인 세션을 제거하지 않는다', async () => {
+    signIn(createMockLoginResponse());
+    let started = false;
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/logout`, async () => {
+        started = true;
+        await gate;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = renderPage('/chats');
+    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    await waitFor(() => expect(started).toBe(true));
+    const next = createMockLoginResponse();
+    act(() => {
+      signOut();
+      signIn(next);
+    });
+    release();
+    await waitFor(() => expect(screen.getByRole('button', { name: '로그아웃' })).toBeEnabled());
+    expect(getAuthSession()?.accessToken).toBe(next.access_token);
+    expect(screen.queryByRole('heading', { name: '로그인' })).not.toBeInTheDocument();
   });
 
   it('보호 API의 401은 토큰을 제거하고 로그인 화면으로 이동한다', async () => {

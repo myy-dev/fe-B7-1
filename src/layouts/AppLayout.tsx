@@ -1,9 +1,10 @@
 import { Link, Outlet, useMatch } from 'react-router';
 import DuckAvatar from '../components/DuckAvatar';
+import LogoutButton from '../components/LogoutButton';
 import { useAuth } from '../lib/auth';
 
 export default function AppLayout() {
-  const { session, signOut } = useAuth();
+  const { session } = useAuth();
   const isChatPage = Boolean(useMatch('/chats/*'));
   const isHomePage = Boolean(useMatch('/chats'));
 
@@ -35,9 +36,7 @@ export default function AppLayout() {
               관리자
             </Link>
             {session ? (
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => signOut()}>
-                로그아웃
-              </button>
+              <LogoutButton />
             ) : (
               <Link to="/login" className="btn btn-ghost btn-sm">
                 로그인
