@@ -1,6 +1,9 @@
-import { Link, NavLink, Outlet } from 'react-router';
+import { Link, Navigate, NavLink, Outlet } from 'react-router';
+import { useAuth } from '../lib/auth';
 
 export default function AdminLayout() {
+  const { session, signOut } = useAuth();
+  if (!session) return <Navigate to="/login" replace />;
   return (
     <div data-theme="light" className="flex min-h-dvh flex-col bg-base-200 text-base-content">
       <a
@@ -10,13 +13,21 @@ export default function AdminLayout() {
         본문으로 건너뛰기
       </a>
       <header className="border-b border-base-300 bg-base-100">
-        <nav aria-label="관리자 서비스 이동" className="navbar min-h-20 justify-between gap-4 px-5">
-          <Link to="/admin/users" className="text-lg font-bold">
+        <nav
+          aria-label="관리자 서비스 이동"
+          className="navbar min-h-20 flex-wrap justify-between gap-4 px-5"
+        >
+          <Link to="/admin/users" className="text-lg font-bold whitespace-nowrap">
             꽥꽥이 관리자
           </Link>
-          <Link to="/chats" className="btn btn-ghost btn-sm">
-            서비스로 이동
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link to="/chats" className="btn btn-ghost btn-sm">
+              서비스로 이동
+            </Link>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => signOut()}>
+              로그아웃
+            </button>
+          </div>
         </nav>
       </header>
       <div className="grid flex-1 content-start gap-5 p-5 lg:grid-cols-[15rem_minmax(0,1fr)]">
