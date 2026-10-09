@@ -133,16 +133,16 @@ export default function SignupPage() {
               placeholder="아이디를 입력해 주세요"
               disabled={pending}
               aria-invalid={Boolean(errors.username)}
-              aria-describedby={errors.username ? 'signup-username-error' : undefined}
+              aria-describedby="signup-username-help"
               onChange={(event) => changeUsername(event.target.value)}
             />
           </div>
           <p
-            id="signup-username-error"
+            id="signup-username-help"
             role={errors.username ? 'alert' : undefined}
-            className="text-error"
+            className={errors.username ? 'text-error' : 'text-base-content/70'}
           >
-            {errors.username}
+            {errors.username || '영문·숫자·밑줄(_)만 사용, 4~20자(공백 불가)'}
           </p>
         </div>
         <div className="fieldset p-0">
@@ -172,7 +172,7 @@ export default function SignupPage() {
             role={errors.password ? 'alert' : undefined}
             className={errors.password ? 'text-error' : 'text-base-content/70'}
           >
-            {errors.password || '영문·숫자·특수문자 포함 8~128자, 공백 불가'}
+            {errors.password || '영문·숫자·특수문자 포함 8자 이상(공백 불가)'}
           </p>
         </div>
         <div className="fieldset p-0">

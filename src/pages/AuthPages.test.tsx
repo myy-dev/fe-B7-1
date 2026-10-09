@@ -262,10 +262,13 @@ describe('회원가입 API 연결', () => {
     await screen.findByRole('heading', { name: '로그인' });
   });
 
-  it('입력 전에 비밀번호 규칙을 안내하고 입력 필드와 연결한다', () => {
+  it('입력 전에 아이디와 비밀번호 규칙을 안내하고 입력 필드와 연결한다', () => {
     renderPage('/signup');
+    expect(screen.getByLabelText('아이디')).toHaveAccessibleDescription(
+      '영문·숫자·밑줄(_)만 사용, 4~20자(공백 불가)',
+    );
     expect(screen.getByLabelText('비밀번호')).toHaveAccessibleDescription(
-      '영문·숫자·특수문자 포함 8~128자, 공백 불가',
+      '영문·숫자·특수문자 포함 8자 이상(공백 불가)',
     );
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
