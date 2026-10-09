@@ -39,8 +39,7 @@ afterEach(() => {
 describe('채팅 세션 화면', () => {
   it('홈에서 목록을 조회하고 기존 대화로 이동한다', async () => {
     const user = renderPage();
-    expect(screen.getByRole('button', { name: '새 대화 시작' })).toBeInTheDocument();
-    expect(screen.getByText('대화 목록 불러오는 중')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '새 대화 시작' })).toBeInTheDocument();
     const nav = await screen.findByRole('navigation', { name: '대화 목록' });
     const links = within(nav).getAllByRole('link');
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
@@ -308,7 +307,7 @@ describe('채팅 MSW 계약', () => {
 describe('질문 전송', () => {
   it('새 대화에서 공백을 막고 한 번 전송한 질문과 답변을 저장·조회한다', async () => {
     const user = renderPage();
-    await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
+    await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     const input = await screen.findByRole('textbox', { name: '메시지' });
     const button = screen.getByRole('button', { name: '보내기' });
     expect(button).toBeDisabled();

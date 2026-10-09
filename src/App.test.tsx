@@ -18,14 +18,16 @@ describe('기본 라우팅', () => {
     expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/login');
   });
 
-  it('로그인 후 채팅 시작 주소로 직접 접근할 수 있다', () => {
+  it('로그인 후 채팅 시작 주소로 직접 접근할 수 있다', async () => {
     signIn(createMockLoginResponse());
     render(
       <MemoryRouter initialEntries={['/chats']}>
         <App />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' }),
+    ).toBeInTheDocument();
   });
 
   it.each(['/unknown', '/chats/unknown/messages'])(
@@ -54,17 +56,22 @@ describe('기본 라우팅', () => {
     expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
   });
 
-  it.each(['/', '/login', '/signup'])('로그인 상태의 %s 접근은 채팅 화면으로 이동한다', (path) => {
-    signIn(createMockLoginResponse());
-    render(
-      <MemoryRouter initialEntries={[path]}>
-        <App />
-        <CurrentPath />
-      </MemoryRouter>,
-    );
-    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
-    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/chats');
-  });
+  it.each(['/', '/login', '/signup'])(
+    '로그인 상태의 %s 접근은 채팅 화면으로 이동한다',
+    async (path) => {
+      signIn(createMockLoginResponse());
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+          <CurrentPath />
+        </MemoryRouter>,
+      );
+      expect(
+        await screen.findByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/chats');
+    },
+  );
 });
 
 function CurrentPath() {

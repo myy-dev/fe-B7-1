@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, Navigate, NavLink, useNavigate, useParams } from 'react-router';
+import { Link, NavLink, useNavigate, useParams } from 'react-router';
 import ChatMessages from '../components/ChatMessages';
 import DeleteChatDialog from '../components/DeleteChatDialog';
 import DuckAvatar from '../components/DuckAvatar';
@@ -14,6 +14,7 @@ import {
 } from '../lib/chats';
 import HomePage from './HomePage';
 import { useAuth } from '../lib/auth';
+import AuthGate from '../components/AuthGate';
 
 type SessionListState = {
   status: 'loading' | 'success' | 'error';
@@ -23,8 +24,11 @@ type SessionListState = {
 
 export default function ChatPage() {
   const { session } = useAuth();
-  if (!session) return <Navigate to="/login" replace />;
-  return <ChatWorkspace key={session.accessToken} />;
+  return (
+    <AuthGate>
+      <ChatWorkspace key={session?.accessToken} />
+    </AuthGate>
+  );
 }
 
 function ChatWorkspace() {

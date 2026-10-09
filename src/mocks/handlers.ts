@@ -1,6 +1,6 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
-import type { LoginResponse } from '../lib/auth';
+import type { CurrentUser, LoginResponse } from '../lib/auth';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
 import {
   dateRangeError,
@@ -165,20 +165,44 @@ let sendFailures = new Set<string>();
 let deleteFailures = new Set<string>();
 let signupUsernames = new Set(['duck', 'taken']);
 const revokedTokens = new Set<string>();
-export function createMockLoginResponse(expiresIn = 1800): LoginResponse {
+export function createMockLoginResponse(
+  expiresIn = 1800,
+  role: CurrentUser['role'] = 'user',
+): LoginResponse {
   // 미리보기 새로고침 후에도 유효한 토큰을 확인할 수 있도록 만료 시각을 포함한다.
-  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}`;
+  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}.${role}`;
   return { access_token: token, token_type: 'bearer', expires_in: expiresIn };
 }
 
 function authenticationError(request: Request) {
   const token = request.headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
-  const match = /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)$/.exec(
-    token,
-  );
+  const match =
+    /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)\.(user|admin)$/.exec(
+      token,
+    );
   if (!match || Number(match[1]) <= Date.now() || revokedTokens.has(token))
     return chatError('UNAUTHORIZED', '로그인이 필요합니다.', 401);
   return null;
+}
+
+function adminAuthenticationError(request: Request) {
+  const unauthorized = authenticationError(request);
+  if (unauthorized) return unauthorized;
+  return request.headers.get('Authorization')!.endsWith('.admin')
+    ? null
+    : chatError('FORBIDDEN', '관리자 권한이 필요합니다.', 403);
+}
+
+function mockCurrentUser(request: Request): CurrentUser {
+  const admin = request.headers.get('Authorization')!.endsWith('.admin');
+  return {
+    id: admin ? 1 : 2,
+    username: admin ? 'admin' : 'friend',
+    name: admin ? '관리자' : '오리 친구',
+    role: admin ? 'admin' : 'user',
+    created_at: '2026-10-05T03:00:00Z',
+    last_login_at: '2026-10-09T03:00:00Z',
+  };
 }
 
 export function resetAuthMocks() {
@@ -209,6 +233,8 @@ function chatError(
 
 export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/admin/users`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const failure = await adminFailure('users');
     if (failure) return failure;
     const query = readAdminQuery(request);
@@ -219,7 +245,9 @@ export const handlers = [
       query.size,
     );
   }),
-  http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ params }) => {
+  http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const failure = await adminFailure('user');
     if (failure) return failure;
     const id = positiveInteger(String(params.userId));
@@ -230,6 +258,8 @@ export const handlers = [
       : chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/sessions`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
     const failure = await adminFailure('sessions');
     if (failure) return failure;
@@ -241,7 +271,9 @@ export const handlers = [
       query.size,
     );
   }),
-  http.get(`${API_BASE_URL}/api/v1/admin/sessions/:chatId`, async ({ params }) => {
+  http.get(`${API_BASE_URL}/api/v1/admin/sessions/:chatId`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
     const failure = await adminFailure('session');
     if (failure) return failure;
@@ -253,6 +285,8 @@ export const handlers = [
       : chatError('SESSION_NOT_FOUND', '세션을 찾을 수 없어요.', 404);
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/logs`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
     const failure = await adminFailure('logs');
     if (failure) return failure;
@@ -272,6 +306,8 @@ export const handlers = [
     return adminPage(messages, query.page, query.size);
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const failure = await adminFailure('system');
     if (failure) return failure;
     const query = readAdminQuery(request);
@@ -402,6 +438,14 @@ export const handlers = [
         : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
     return HttpResponse.json(message, { status: 201 });
   }),
+  http.get(`${API_BASE_URL}/api/v1/auth/me`, async ({ request }) => {
+    const unauthorized = authenticationError(request);
+    if (unauthorized) return unauthorized;
+    const scenario = import.meta.env.VITE_AUTH_MOCK_SCENARIO;
+    if (scenario === 'slow') await delay(1500);
+    if (scenario === 'error') return chatError('DB_ERROR', '내 정보를 불러오지 못했어요.', 500);
+    return HttpResponse.json(mockCurrentUser(request));
+  }),
   http.post(`${API_BASE_URL}/api/v1/auth/logout`, async ({ request }) => {
     await delay(300);
     const unauthorized = authenticationError(request);
@@ -428,7 +472,9 @@ export const handlers = [
       return chatError('INVALID_CREDENTIALS', '아이디 또는 비밀번호가 올바르지 않습니다.', 401);
     if (username.toLowerCase() === 'error')
       return chatError('AUTH_CONFIGURATION_ERROR', '인증 서비스 설정을 확인해야 합니다.', 503);
-    return HttpResponse.json(createMockLoginResponse());
+    return HttpResponse.json(
+      createMockLoginResponse(1800, username.toLowerCase() === 'admin' ? 'admin' : 'user'),
+    );
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/signup`, async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown> | null;

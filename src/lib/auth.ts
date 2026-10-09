@@ -11,6 +11,46 @@ export interface AuthSession {
   expiresAt: number;
 }
 
+export interface CurrentUser {
+  id: number;
+  username: string;
+  name: string;
+  role: 'user' | 'admin';
+  created_at: string;
+  last_login_at: string | null;
+}
+
+export function parseCurrentUser(value: unknown): CurrentUser {
+  if (
+    !value ||
+    typeof value !== 'object' ||
+    !('id' in value) ||
+    typeof value.id !== 'number' ||
+    !Number.isSafeInteger(value.id) ||
+    value.id <= 0 ||
+    !('username' in value) ||
+    typeof value.username !== 'string' ||
+    !value.username ||
+    !('name' in value) ||
+    typeof value.name !== 'string' ||
+    !('role' in value) ||
+    (value.role !== 'user' && value.role !== 'admin') ||
+    !('created_at' in value) ||
+    typeof value.created_at !== 'string' ||
+    !Number.isFinite(Date.parse(value.created_at)) ||
+    !('last_login_at' in value) ||
+    (value.last_login_at !== null &&
+      (typeof value.last_login_at !== 'string' ||
+        !Number.isFinite(Date.parse(value.last_login_at))))
+  )
+    throw new Error('내 정보 응답을 확인하지 못했습니다.');
+  return value as CurrentUser;
+}
+
+export function getHomePath(user: CurrentUser | null) {
+  return user?.role === 'admin' ? '/admin/users' : '/chats';
+}
+
 const storageKey = 'quackquack.auth';
 let session: AuthSession | null = null;
 let initialized = false;
@@ -97,6 +137,9 @@ export function getAccessToken(): string | null {
 
 export const AuthContext = createContext<{
   session: AuthSession | null;
+  user: CurrentUser | null;
+  error: string;
+  retryUser: () => void;
   signIn: typeof signIn;
   signOut: () => void;
 } | null>(null);

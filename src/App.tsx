@@ -12,7 +12,8 @@ import AdminSessionPage from './pages/AdminSessionPage';
 import AdminLogsPage from './pages/AdminLogsPage';
 import AdminSystemLogsPage from './pages/AdminSystemLogsPage';
 import AuthProvider from './components/AuthProvider';
-import { useAuth } from './lib/auth';
+import AuthGate from './components/AuthGate';
+import { getHomePath, useAuth } from './lib/auth';
 
 export default function App() {
   return (
@@ -43,6 +44,10 @@ export default function App() {
 }
 
 function StartPage() {
-  const { session } = useAuth();
-  return <Navigate to={session ? '/chats' : '/login'} replace />;
+  const { user } = useAuth();
+  return (
+    <AuthGate>
+      <Navigate to={getHomePath(user)} replace />
+    </AuthGate>
+  );
 }

@@ -9,6 +9,7 @@ describe('API 요청과 MSW 연동', () => {
   it.each([
     ['GET', '/api/v1/chats'],
     ['POST', '/api/v1/auth/logout'],
+    ['GET', '/api/v1/auth/me'],
     ['POST', '/api/v1/chats'],
     ['GET', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75'],
     ['POST', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75/messages'],
@@ -30,7 +31,7 @@ describe('API 요청과 MSW 연동', () => {
     expect(called).toBe(true);
   });
 
-  it.each(['/api/v1/chats', '/api/v1/auth/logout'])(
+  it.each(['/api/v1/chats', '/api/v1/auth/logout', '/api/v1/auth/me', '/api/v1/admin/users'])(
     '토큰 없이 %s 요청을 보내지 않는다',
     async (path) => {
       let calls = 0;

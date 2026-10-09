@@ -1,10 +1,18 @@
-import { Link, Navigate, NavLink, Outlet } from 'react-router';
+import { Link, NavLink, Outlet } from 'react-router';
 import { useAuth } from '../lib/auth';
 import LogoutButton from '../components/LogoutButton';
+import AuthGate from '../components/AuthGate';
 
 export default function AdminLayout() {
   const { session } = useAuth();
-  if (!session) return <Navigate to="/login" replace />;
+  return (
+    <AuthGate admin>
+      <AdminWorkspace key={session?.accessToken} />
+    </AuthGate>
+  );
+}
+
+function AdminWorkspace() {
   return (
     <div data-theme="light" className="flex min-h-dvh flex-col bg-base-200 text-base-content">
       <a
