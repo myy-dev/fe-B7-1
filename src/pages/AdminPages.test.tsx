@@ -17,7 +17,7 @@ import { server } from '../mocks/server';
 import { createMockLoginResponse } from '../mocks/handlers';
 import { signIn } from '../lib/auth';
 
-beforeEach(() => signIn(createMockLoginResponse()));
+beforeEach(() => signIn(createMockLoginResponse(1800, 'admin')));
 
 const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const secondId = '6eb321dc-235c-4e3d-a95e-43f2a601fcd8';
@@ -127,9 +127,9 @@ describe('관리자 회원·세션 조회', () => {
 
   it.each(['/admin/users/abc', '/admin/sessions/abc'])(
     '잘못된 대상 주소 %s를 요청 전에 표시한다',
-    (path) => {
+    async (path) => {
       renderPage(path);
-      expect(screen.getByRole('alert')).toHaveTextContent('주소를 확인해 주세요.');
+      expect(await screen.findByRole('alert')).toHaveTextContent('주소를 확인해 주세요.');
       expect(screen.queryByText('불러오는 중')).not.toBeInTheDocument();
     },
   );
@@ -287,7 +287,7 @@ describe('관리자 조회 조건과 시스템 로그', () => {
 
   it('잘못된 URL의 기간·회원 조건을 표시하고 초기화할 수 있다', async () => {
     const user = renderPage('/admin/logs?user_id=wrong&start=invalid');
-    expect(screen.getByRole('alert')).toHaveTextContent('회원 ID는 양의 정수');
+    expect(await screen.findByRole('alert')).toHaveTextContent('회원 ID는 양의 정수');
     await user.click(screen.getByRole('button', { name: '초기화' }));
     await screen.findByRole('region', { name: '대화 기록 표' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();

@@ -124,9 +124,9 @@ describe('로그인 세션과 채팅 인증', () => {
 
   it('관리자 화면에서도 서버 로그아웃 후 로그인으로 이동한다', async () => {
     vi.stubEnv('VITE_ENABLE_MSW', 'false');
-    signIn(createMockLoginResponse());
+    signIn(createMockLoginResponse(1800, 'admin'));
     const user = renderPage('/admin/users');
-    await user.click(screen.getByRole('button', { name: '로그아웃' }));
+    await user.click(await screen.findByRole('button', { name: '로그아웃' }));
     expect(await screen.findByRole('heading', { name: '로그인' })).toBeInTheDocument();
     expect(getAuthSession()).toBeNull();
     expect(screen.queryByRole('navigation', { name: '관리자 메뉴' })).not.toBeInTheDocument();

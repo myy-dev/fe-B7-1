@@ -47,11 +47,9 @@ function getErrorMessage(body: unknown, status: number): string {
 // T는 응답 타입 선언이며 런타임 데이터 검증을 수행하지 않는다.
 export async function apiRequest<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const requestPath = `/${path.replace(/^\/+/, '')}`;
-  const logout = requestPath === '/api/v1/auth/logout';
-  const authenticated = logout || /^\/api\/v1\/(chats|admin)(\/|\?|$)/.test(requestPath);
+  const authenticated = /^\/api\/v1\/(chats|admin|auth\/(me|logout))(\/|\?|$)/.test(requestPath);
   const token = authenticated ? getAccessToken() : null;
-  if ((logout || /^\/api\/v1\/chats(\/|\?|$)/.test(requestPath)) && !token)
-    throw new ApiError(401, '로그인이 필요합니다.', 'UNAUTHORIZED');
+  if (authenticated && !token) throw new ApiError(401, '로그인이 필요합니다.', 'UNAUTHORIZED');
   const headers = new Headers(options.headers);
   if (token) headers.set('Authorization', `Bearer ${token}`);
   const response = await fetch(`${API_BASE_URL}${requestPath}`, { ...options, headers });

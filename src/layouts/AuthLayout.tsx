@@ -1,10 +1,16 @@
 import { Navigate, Outlet } from 'react-router';
 import DuckAvatar from '../components/DuckAvatar';
-import { useAuth } from '../lib/auth';
+import { getHomePath, useAuth } from '../lib/auth';
+import AuthGate from '../components/AuthGate';
 
 export default function AuthLayout() {
-  const { session } = useAuth();
-  if (session) return <Navigate to="/chats" replace />;
+  const { session, user } = useAuth();
+  if (session)
+    return (
+      <AuthGate>
+        <Navigate to={getHomePath(user)} replace />
+      </AuthGate>
+    );
   return (
     <div className="grid w-full max-w-4xl items-center gap-8 lg:grid-cols-2 lg:gap-16">
       <div className="text-center lg:text-left">

@@ -181,7 +181,7 @@ describe('대화 삭제', () => {
     vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
     resetChatMocks();
     const user = renderPage();
-    await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
+    await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     await screen.findByRole('textbox', { name: '메시지' });
     await user.click(screen.getByRole('link', { name: '처음 화면' }));
     const button = screen.getByRole('button', { name: /대화 삭제$/ });

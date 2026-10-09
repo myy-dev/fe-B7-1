@@ -61,7 +61,6 @@ export default function LoginPage() {
       });
       if (!controller.signal.aborted) {
         signIn(response);
-        navigate('/chats', { replace: true });
       }
     } catch (cause) {
       if (!controller.signal.aborted) {
