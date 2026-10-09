@@ -164,6 +164,7 @@ let chatStore = makeChatStore();
 let sendFailures = new Set<string>();
 let deleteFailures = new Set<string>();
 let signupUsernames = new Set(['duck', 'taken']);
+const revokedTokens = new Set<string>();
 export function createMockLoginResponse(expiresIn = 1800): LoginResponse {
   // 미리보기 새로고침 후에도 유효한 토큰을 확인할 수 있도록 만료 시각을 포함한다.
   const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}`;
@@ -175,13 +176,14 @@ function authenticationError(request: Request) {
   const match = /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)$/.exec(
     token,
   );
-  if (!match || Number(match[1]) <= Date.now())
+  if (!match || Number(match[1]) <= Date.now() || revokedTokens.has(token))
     return chatError('UNAUTHORIZED', '로그인이 필요합니다.', 401);
   return null;
 }
 
 export function resetAuthMocks() {
   signupUsernames = new Set(['duck', 'taken']);
+  revokedTokens.clear();
 }
 
 function makeChatStore() {
@@ -399,6 +401,13 @@ export const handlers = [
           '작은 이야기부터 시작해도 괜찮아요. 꽥꽥이가 함께할게요. '.repeat(12)
         : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
     return HttpResponse.json(message, { status: 201 });
+  }),
+  http.post(`${API_BASE_URL}/api/v1/auth/logout`, async ({ request }) => {
+    await delay(300);
+    const unauthorized = authenticationError(request);
+    if (unauthorized) return unauthorized;
+    revokedTokens.add(request.headers.get('Authorization')!.slice(7));
+    return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/login`, async ({ request }) => {
     const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;

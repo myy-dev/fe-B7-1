@@ -1,8 +1,9 @@
 import { Link, Navigate, NavLink, Outlet } from 'react-router';
 import { useAuth } from '../lib/auth';
+import LogoutButton from '../components/LogoutButton';
 
 export default function AdminLayout() {
-  const { session, signOut } = useAuth();
+  const { session } = useAuth();
   if (!session) return <Navigate to="/login" replace />;
   return (
     <div data-theme="light" className="flex min-h-dvh flex-col bg-base-200 text-base-content">
@@ -24,9 +25,7 @@ export default function AdminLayout() {
             <Link to="/chats" className="btn btn-ghost btn-sm">
               서비스로 이동
             </Link>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => signOut()}>
-              로그아웃
-            </button>
+            <LogoutButton />
           </div>
         </nav>
       </header>

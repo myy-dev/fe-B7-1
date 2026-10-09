@@ -8,6 +8,7 @@ import { API_BASE_URL, apiRequest } from './api';
 describe('API 요청과 MSW 연동', () => {
   it.each([
     ['GET', '/api/v1/chats'],
+    ['POST', '/api/v1/auth/logout'],
     ['POST', '/api/v1/chats'],
     ['GET', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75'],
     ['POST', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75/messages'],
@@ -29,19 +30,29 @@ describe('API 요청과 MSW 연동', () => {
     expect(called).toBe(true);
   });
 
-  it('토큰 없이 채팅 요청을 보내지 않는다', async () => {
-    let calls = 0;
-    server.use(
-      http.get(`${API_BASE_URL}/api/v1/chats`, () => {
-        calls++;
-        return HttpResponse.json({ items: [] });
-      }),
-    );
-    await expect(apiRequest('/api/v1/chats')).rejects.toMatchObject({
-      status: 401,
-      code: 'UNAUTHORIZED',
-    });
-    expect(calls).toBe(0);
+  it.each(['/api/v1/chats', '/api/v1/auth/logout'])(
+    '토큰 없이 %s 요청을 보내지 않는다',
+    async (path) => {
+      let calls = 0;
+      server.use(
+        http.all(`${API_BASE_URL}${path}`, () => {
+          calls++;
+          return HttpResponse.json({ items: [] });
+        }),
+      );
+      await expect(apiRequest(path)).rejects.toMatchObject({
+        status: 401,
+        code: 'UNAUTHORIZED',
+      });
+      expect(calls).toBe(0);
+    },
+  );
+
+  it('로그아웃 MSW가 204를 반환하고 폐기된 토큰의 재사용을 거절한다', async () => {
+    signIn(createMockLoginResponse());
+    await expect(apiRequest('/api/v1/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
+    await expect(apiRequest('/api/v1/chats')).rejects.toMatchObject({ status: 401 });
+    expect(getAuthSession()).toBeNull();
   });
 
   it('로그인 실패의 401로 기존 인증 상태를 삭제하지 않는다', async () => {
