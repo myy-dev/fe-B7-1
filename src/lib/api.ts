@@ -24,10 +24,6 @@ export class ApiError extends Error {
   }
 }
 
-export function isMockEnabled(): boolean {
-  return import.meta.env.VITE_ENABLE_MSW === 'true';
-}
-
 function getErrorMessage(body: unknown, status: number): string {
   if (typeof body === 'object' && body !== null) {
     if ('message' in body && typeof body.message === 'string') return body.message;

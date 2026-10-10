@@ -132,7 +132,6 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
   ];
   return (
     <form
-      key={search.toString()}
       onSubmit={submit}
       className="card border border-base-300 bg-base-100"
       aria-label="조회 조건"
