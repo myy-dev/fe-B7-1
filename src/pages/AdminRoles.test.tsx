@@ -2,39 +2,13 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, useNavigate } from 'react-router';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import { getAccessToken, signIn } from '../lib/auth';
 import { createMockLoginResponse } from '../mocks/handlers';
 import { server } from '../mocks/server';
 
-const dialogMethods = ['showModal', 'close'] as const;
-const originalMethods = dialogMethods.map((name) =>
-  Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name),
-);
-beforeAll(() => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.setAttribute('open', '');
-    },
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.removeAttribute('open');
-      this.dispatchEvent(new Event('close'));
-    },
-  });
-});
-afterAll(() => {
-  dialogMethods.forEach((name, index) => {
-    const original = originalMethods[index];
-    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
-    else delete HTMLDialogElement.prototype[name];
-  });
-});
 beforeEach(() => {
   vi.stubEnv('VITE_ENABLE_MSW', 'false');
   signIn(createMockLoginResponse(1800, 'admin'));

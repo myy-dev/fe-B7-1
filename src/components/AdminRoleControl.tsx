@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { AdminUser } from '../lib/admin';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth } from '../lib/auth';
+import ConfirmDialog from './ConfirmDialog';
+import FeedbackToast from './FeedbackToast';
 import AdminRoleBadge from './AdminRoleBadge';
 
 export default function AdminRoleControl({ member }: { member: AdminUser }) {
@@ -10,7 +12,6 @@ export default function AdminRoleControl({ member }: { member: AdminUser }) {
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [notice, setNotice] = useState<{ error: boolean; message: string } | null>(null);
-  const dialog = useRef<HTMLDialogElement>(null);
   const request = useRef<AbortController | null>(null);
   const nextRole = role === 'user' ? 'admin' : 'user';
   const nextLabel = nextRole === 'admin' ? '관리자' : '사용자';
@@ -18,17 +19,6 @@ export default function AdminRoleControl({ member }: { member: AdminUser }) {
     user?.role === 'admin' && user.id !== member.id && (role === 'user' || role === 'admin');
 
   useEffect(() => () => request.current?.abort(), []);
-  useEffect(() => {
-    const element = dialog.current;
-    if (open && element && !element.open) element.showModal();
-    if (!open && element?.open) element.close();
-  }, [open]);
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(null), 5000);
-    return () => clearTimeout(timer);
-  }, [notice]);
-
   async function changeRole() {
     if (!canChange || request.current) return;
     const controller = new AbortController();
@@ -91,72 +81,30 @@ export default function AdminRoleControl({ member }: { member: AdminUser }) {
           </button>
         )}
       </div>
-      <dialog
-        ref={dialog}
-        className="modal modal-middle"
-        aria-labelledby="role-change-title"
-        aria-describedby="role-change-target"
-        onCancel={(event) => {
-          if (request.current) event.preventDefault();
-        }}
-        onClose={() => setOpen(false)}
-      >
-        <div className="modal-box space-y-4 border border-base-300 bg-base-100">
-          <h2 id="role-change-title" className="text-lg font-bold">
-            회원 권한을 변경할까요?
-          </h2>
-          <p id="role-change-target" className="wrap-anywhere">
-            {member.name} ({member.username}) · {role === 'admin' ? '관리자' : '사용자'} →{' '}
-            {nextLabel}
-          </p>
-          <div className="modal-action">
-            <button
-              type="button"
-              className="btn btn-ghost"
-              disabled={pending}
-              onClick={() => setOpen(false)}
-              autoFocus
-            >
-              취소
-            </button>
-            <button
-              type="button"
-              className="btn btn-primary"
-              disabled={pending}
-              onClick={() => void changeRole()}
-            >
-              {pending && (
-                <span aria-hidden="true" className="loading loading-sm loading-spinner" />
-              )}
-              {pending ? '변경 중…' : '변경'}
-            </button>
-          </div>
-        </div>
-        <button
-          type="button"
-          className="modal-backdrop"
-          aria-label="권한 변경 확인 닫기"
-          disabled={pending}
-          onClick={() => setOpen(false)}
+      {open && (
+        <ConfirmDialog
+          title="회원 권한을 변경할까요?"
+          description={
+            <>
+              {member.name} ({member.username}) · {role === 'admin' ? '관리자' : '사용자'} →{' '}
+              {nextLabel}
+            </>
+          }
+          pending={pending}
+          confirmLabel="변경"
+          pendingLabel="변경 중…"
+          closeLabel="권한 변경 확인 닫기"
+          onConfirm={changeRole}
+          onClose={() => setOpen(false)}
         />
-      </dialog>
+      )}
       {notice && (
-        <div className="toast toast-center toast-top z-50 w-max max-w-full px-4">
-          <div
-            role={notice.error ? 'alert' : 'status'}
-            className={`alert text-sm shadow-lg ${notice.error ? 'alert-error' : 'alert-success'}`}
-          >
-            <span>{notice.message}</span>
-            <button
-              type="button"
-              aria-label="권한 변경 알림 닫기"
-              className="btn btn-circle btn-ghost btn-xs"
-              onClick={() => setNotice(null)}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </div>
+        <FeedbackToast
+          message={notice.message}
+          error={notice.error}
+          closeLabel="권한 변경 알림 닫기"
+          onClose={() => setNotice(null)}
+        />
       )}
     </>
   );

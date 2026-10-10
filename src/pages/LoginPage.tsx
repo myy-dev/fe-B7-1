@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router';
+import FeedbackToast from '../components/FeedbackToast';
 import { ApiError, apiRequest } from '../lib/api';
 import { useAuth, type LoginResponse } from '../lib/auth';
 
@@ -23,12 +24,6 @@ export default function LoginPage() {
     delete state.signupComplete;
     navigate(`${location.pathname}${location.search}${location.hash}`, { replace: true, state });
   }, [location, navigate]);
-
-  useEffect(() => {
-    if (!signupComplete) return;
-    const timer = window.setTimeout(() => setSignupComplete(false), 5000);
-    return () => window.clearTimeout(timer);
-  }, [signupComplete]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -86,29 +81,11 @@ export default function LoginPage() {
         로그인
       </h1>
       {signupComplete && (
-        <div className="toast toast-center toast-top z-50 w-max max-w-full px-4">
-          <div role="status" className="alert text-sm alert-success shadow-lg">
-            <span>회원가입 완료</span>
-            <button
-              type="button"
-              aria-label="회원가입 완료 알림 닫기"
-              className="btn btn-circle btn-ghost btn-xs"
-              onClick={() => setSignupComplete(false)}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                className="size-4"
-              >
-                <path d="m6 6 12 12M18 6 6 18" />
-              </svg>
-            </button>
-          </div>
-        </div>
+        <FeedbackToast
+          message="회원가입 완료"
+          closeLabel="회원가입 완료 알림 닫기"
+          onClose={() => setSignupComplete(false)}
+        />
       )}
       <form noValidate onSubmit={handleSubmit} aria-busy={pending} className="mt-6 space-y-5">
         <div className="fieldset p-0">
@@ -120,7 +97,7 @@ export default function LoginPage() {
             name="username"
             autoComplete="username"
             required
-            className="input w-full"
+            className={`input w-full ${errors.username ? 'input-error' : ''}`}
             placeholder="아이디를 입력해 주세요"
             value={username}
             disabled={pending}
@@ -148,7 +125,7 @@ export default function LoginPage() {
             type="password"
             autoComplete="current-password"
             required
-            className="input w-full"
+            className={`input w-full ${errors.password ? 'input-error' : ''}`}
             placeholder="비밀번호를 입력해 주세요"
             value={password}
             disabled={pending}
