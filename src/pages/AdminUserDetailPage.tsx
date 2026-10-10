@@ -19,7 +19,7 @@ export default function AdminUserDetailPage() {
   const query = adminQuery(search, []);
   if (id) query.set('user_id', String(id));
   const sessions = useAdminResource<AdminPage<AdminSession>>(
-    user.data ? `/api/v1/admin/sessions?${query}` : null,
+    id ? `/api/v1/admin/sessions?${query}` : null,
   );
   return (
     <>

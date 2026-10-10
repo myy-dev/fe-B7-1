@@ -164,6 +164,42 @@ describe('관리자 회원·세션 조회', () => {
     expect(calls).toBe(2);
   });
 
+  it('회원 상세 응답을 기다리지 않고 세션 목록을 병렬로 요청한다', async () => {
+    let release!: () => void;
+    let sessionsStarted = false;
+    const deferred = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users/3`, async () => {
+        await deferred;
+        return HttpResponse.json({
+          id: 3,
+          name: '병렬 조회 회원',
+          username: 'parallel',
+          role: 'user',
+          created_at: '2026-10-05T03:00:00Z',
+          last_login_at: null,
+        });
+      }),
+      http.get(`${API_BASE_URL}/api/v1/admin/sessions`, ({ request }) => {
+        expect(new URL(request.url).searchParams.get('user_id')).toBe('3');
+        sessionsStarted = true;
+        return HttpResponse.json({ items: [], total: 0, page: 1, size: 20 });
+      }),
+    );
+    renderPage('/admin/users/3');
+    try {
+      await waitFor(() => expect(sessionsStarted).toBe(true));
+      expect(screen.queryByRole('region', { name: '회원 정보' })).not.toBeInTheDocument();
+      release();
+      await screen.findByRole('heading', { name: '병렬 조회 회원' });
+      expect(screen.getByText('대화 세션이 없어요.')).toBeInTheDocument();
+    } finally {
+      release();
+    }
+  });
+
   it('이전 회원 응답이 늦게 와도 현재 회원을 바꾸지 않는다', async () => {
     let release!: () => void;
     const deferred = new Promise<void>((resolve) => {

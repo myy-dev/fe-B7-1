@@ -45,7 +45,7 @@ describe('내정보 조회와 권한별 화면', () => {
       const path = username === 'admin' ? '/admin/users' : '/chats';
       await waitFor(() => expect(screen.getByLabelText('현재 경로')).toHaveTextContent(path));
       if (username === 'admin') {
-        await user.click(screen.getByRole('link', { name: '서비스로 이동' }));
+        await user.click(await screen.findByRole('link', { name: '서비스로 이동' }));
         expect(screen.getByRole('link', { name: '관리자' })).toHaveAttribute(
           'href',
           '/admin/users',
