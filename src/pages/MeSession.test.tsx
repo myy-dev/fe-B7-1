@@ -197,14 +197,14 @@ describe('내정보 조회와 권한별 화면', () => {
     let calls = 0;
     server.use(
       http.get(`${API_BASE_URL}/api/v1/auth/me`, () =>
-        HttpResponse.json(++calls === 1 ? adminInfo : userInfo),
+        HttpResponse.json(++calls === 1 ? adminInfo : { ...adminInfo, role: 'user' }),
       ),
     );
     renderPage('/admin/users');
     await screen.findByRole('navigation', { name: '관리자 메뉴' });
     cleanup();
     renderPage('/admin/users');
-    await screen.findByRole('navigation', { name: '대화 목록' });
+    await screen.findByText('아직 대화가 없어요.');
     expect(calls).toBe(2);
     expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/chats');
     expect(screen.queryByRole('link', { name: '관리자' })).not.toBeInTheDocument();

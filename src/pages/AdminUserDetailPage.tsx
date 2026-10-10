@@ -87,7 +87,7 @@ export default function AdminUserDetailPage() {
                     {sessions.data.items.map((session) => (
                       <tr key={session.chat_id}>
                         <td>
-                          <p className="max-w-sm wrap-anywhere">{session.title}</p>
+                          <p className="max-w-sm wrap-anywhere">{session.title || '새 대화'}</p>
                           <p className="mt-1 max-w-sm font-mono text-xs wrap-anywhere text-base-content/60">
                             {session.chat_id}
                           </p>
@@ -98,7 +98,7 @@ export default function AdminUserDetailPage() {
                           <Link
                             className="btn btn-ghost btn-sm"
                             to={`/admin/sessions/${session.chat_id}`}
-                            aria-label={`${session.title} 대화 보기`}
+                            aria-label={`${session.title || '새 대화'} 대화 보기`}
                           >
                             보기
                           </Link>

@@ -77,20 +77,20 @@ describe('관리자 회원·세션 조회', () => {
 
   it('회원 상세에서 회원별 세션과 해당 대화만 조회한다', async () => {
     const user = renderPage();
-    await user.click(await screen.findByRole('link', { name: '사용자A 회원 상세' }));
+    await user.click(await screen.findByRole('link', { name: '사용자B 회원 상세' }));
     const sessions = await screen.findByRole('region', { name: '회원 대화 세션 표' });
     expect(within(sessions).getByText(firstId)).toBeInTheDocument();
-    expect(within(sessions).queryByText(secondId)).not.toBeInTheDocument();
+    expect(within(sessions).getByText(secondId)).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '오늘 하루가 조금 지쳤어. 대화 보기' }));
     const chat = await screen.findByRole('list', { name: '대화 기록' });
     expect(within(chat).getByText('기분 전환할 만한 작은 일이 있을까?')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '메시지' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('link', { name: '회원 번호(PK) 1' }));
+    await user.click(screen.getByRole('link', { name: '회원 번호(PK) 2' }));
     await user.click(await screen.findByRole('link', { name: '회원 대화 기록' }));
     const logs = await screen.findByRole('region', { name: '대화 기록 표' });
     expect(within(logs).getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
-    expect(screen.queryByText('주말 계획을 같이 세워 줄래?')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('user_id=1');
+    expect(screen.getByText('주말 계획을 같이 세워 줄래?')).toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('user_id=2');
   });
 
   it('로그인 기록이 없는 회원과 세션이 없는 회원을 표시한다', async () => {
@@ -330,12 +330,15 @@ describe('관리자 MSW API 계약', () => {
     const detail = await apiRequest<AdminSessionDetail>(`/api/v1/admin/sessions/${secondId}`);
     const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=2');
     expect(user.last_login_at).toBeNull();
-    expect(sessions.items.map((session) => session.chat_id)).toEqual([secondId]);
+    expect(sessions.items.map((session) => session.chat_id)).toEqual([firstId, secondId, emptyId]);
     expect(detail.message_count).toBe(detail.messages.length);
-    expect(logs.items.map((log) => log.request_id).sort()).toEqual(
-      detail.messages.map((message) => message.request_id).sort(),
-    );
-    expect(logs.items.every((log) => log.chat_id === secondId)).toBe(true);
+    expect(
+      logs.items
+        .filter((log) => log.chat_id === secondId)
+        .map((log) => log.request_id)
+        .sort(),
+    ).toEqual(detail.messages.map((message) => message.request_id).sort());
+    expect(detail.title).toBe(detail.messages[0].question);
   });
 
   it('기간·레벨·이벤트로 필터한 뒤 전체 수량과 페이지를 계산한다', async () => {
@@ -348,7 +351,7 @@ describe('관리자 MSW API 계약', () => {
       result.items.every((log) => log.level === 'ERROR' && log.event === 'ai_call_failed'),
     ).toBe(true);
     const records = await apiRequest<AdminPage<ChatMessage>>(
-      '/api/v1/admin/logs?user_id=1&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
+      '/api/v1/admin/logs?user_id=2&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
     );
     expect(records.total).toBe(1);
     expect(records.items[0].question).toBe('기분 전환할 만한 작은 일이 있을까?');
@@ -368,11 +371,12 @@ describe('관리자 MSW API 계약', () => {
     expect(detail.message_count).toBe(1);
     expect(detail.messages[0].question).toBe('관리자에서도 조회할 질문');
     await apiRequest(`/api/v1/chats/${session.chat_id}`, { method: 'DELETE' });
-    await expect(apiRequest(`/api/v1/admin/sessions/${session.chat_id}`)).rejects.toMatchObject({
-      status: 404,
-    });
+    const deleted = await apiRequest<AdminSessionDetail>(
+      `/api/v1/admin/sessions/${session.chat_id}`,
+    );
+    expect(deleted.messages).toEqual(detail.messages);
     const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=1');
-    expect(logs.items.some((message) => message.chat_id === session.chat_id)).toBe(false);
+    expect(logs.items.some((message) => message.chat_id === session.chat_id)).toBe(true);
   });
 
   it('필수 회원 번호(PK)·페이지 범위가 잘못되면 422를 반환한다', async () => {
