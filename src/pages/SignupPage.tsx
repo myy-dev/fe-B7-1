@@ -100,7 +100,7 @@ export default function SignupPage() {
             name="name"
             autoComplete="name"
             required
-            className="input w-full"
+            className={`input w-full ${errors.name ? 'input-error' : ''}`}
             value={name}
             placeholder="이름을 입력해 주세요"
             disabled={pending}
@@ -122,21 +122,19 @@ export default function SignupPage() {
           <label htmlFor="signup-username" className="fieldset-label text-base-content">
             아이디
           </label>
-          <div className="flex min-w-0 gap-2">
-            <input
-              id="signup-username"
-              name="username"
-              autoComplete="username"
-              required
-              className="input w-full min-w-0 flex-1"
-              value={username}
-              placeholder="아이디를 입력해 주세요"
-              disabled={pending}
-              aria-invalid={Boolean(errors.username)}
-              aria-describedby="signup-username-help"
-              onChange={(event) => changeUsername(event.target.value)}
-            />
-          </div>
+          <input
+            id="signup-username"
+            name="username"
+            autoComplete="username"
+            required
+            className={`input w-full ${errors.username ? 'input-error' : ''}`}
+            value={username}
+            placeholder="아이디를 입력해 주세요"
+            disabled={pending}
+            aria-invalid={Boolean(errors.username)}
+            aria-describedby="signup-username-help"
+            onChange={(event) => changeUsername(event.target.value)}
+          />
           <p
             id="signup-username-help"
             role={errors.username ? 'alert' : undefined}
@@ -155,7 +153,7 @@ export default function SignupPage() {
             type="password"
             autoComplete="new-password"
             required
-            className="input w-full"
+            className={`input w-full ${errors.password ? 'input-error' : ''}`}
             value={password}
             placeholder="비밀번호를 입력해 주세요"
             disabled={pending}
@@ -185,7 +183,7 @@ export default function SignupPage() {
             type="password"
             autoComplete="new-password"
             required
-            className="input w-full"
+            className={`input w-full ${errors.passwordConfirm ? 'input-error' : ''}`}
             value={passwordConfirm}
             placeholder="비밀번호를 다시 입력해 주세요"
             disabled={pending}

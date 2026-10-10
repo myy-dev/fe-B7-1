@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import FeedbackToast from './FeedbackToast';
 import { ApiError, apiRequest } from '../lib/api';
 import { getAuthSession, signOut, useAuth } from '../lib/auth';
 
@@ -9,12 +10,6 @@ export default function LogoutButton() {
   const [error, setError] = useState('');
 
   useEffect(() => () => request.current?.abort(), []);
-  useEffect(() => {
-    if (!error) return;
-    const timer = setTimeout(() => setError(''), 5000);
-    return () => clearTimeout(timer);
-  }, [error]);
-
   async function logout() {
     if (!session || request.current) return;
     const token = session.accessToken;
@@ -54,19 +49,12 @@ export default function LogoutButton() {
         {pending ? '로그아웃 중…' : '로그아웃'}
       </button>
       {error && (
-        <div className="toast toast-center toast-top z-50 w-max max-w-full px-4">
-          <div role="alert" className="alert text-sm alert-error shadow-lg">
-            <span>{error}</span>
-            <button
-              type="button"
-              aria-label="로그아웃 오류 알림 닫기"
-              className="btn btn-circle btn-ghost btn-xs"
-              onClick={() => setError('')}
-            >
-              <span aria-hidden="true">×</span>
-            </button>
-          </div>
-        </div>
+        <FeedbackToast
+          message={error}
+          error
+          closeLabel="로그아웃 오류 알림 닫기"
+          onClose={() => setError('')}
+        />
       )}
     </>
   );

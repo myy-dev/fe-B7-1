@@ -259,9 +259,10 @@ describe('채팅 세션 화면', () => {
       const nav = screen.getByRole('navigation', { name: '대화 목록' });
       await user.click(within(nav).getAllByRole('link')[1]);
       await screen.findByText('주말 계획을 같이 세워 줄래?');
-      expect(signal?.aborted).toBe(true);
+      expect(signal?.aborted).toBe(false);
       release?.();
-      await user.tab();
+      await waitFor(() => expect(screen.getByRole('button', { name: '새 대화' })).toBeEnabled());
+      expect(within(nav).getAllByRole('link')).toHaveLength(4);
       expect(screen.getByLabelText('현재 경로')).toHaveTextContent(`/chats/${secondId}`);
       expect(screen.getByRole('button', { name: '새 대화' })).toBeEnabled();
     } finally {
@@ -444,20 +445,14 @@ describe('질문 전송', () => {
     await user.type(input, '보존할 질문');
     await user.click(screen.getByRole('button', { name: '보내기' }));
     await screen.findByText('메시지를 보내지 못했어요. 다시 시도해 주세요.');
+    await screen.findByText('전송 결과를 확인하고 있어요. 확인 전에는 다시 보내지 마세요.');
+    expect(await screen.findByRole('button', { name: '보내기' })).toBeDisabled();
     expect(input).toHaveValue('보존할 질문');
     expect(screen.getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
-    server.use(
-      http.post(`${API_BASE_URL}/api/v1/chats/${firstId}/messages`, () =>
-        HttpResponse.json(
-          { error: { code: 'DB_ERROR', message: '저장 실패', request_id: 'failed' } },
-          { status: 500 },
-        ),
-      ),
-      http.get(`${API_BASE_URL}/api/v1/chats/${firstId}`, () => HttpResponse.error()),
-    );
-    await user.click(screen.getByRole('button', { name: '보내기' }));
-    await screen.findByText('저장 실패');
-    await waitFor(() => expect(input).toBeEnabled());
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats/${firstId}`, () => HttpResponse.error()));
+    await user.click(screen.getByRole('button', { name: '기록 다시 확인' }));
+    await screen.findByText('기록을 확인하지 못했어요. 다시 확인해 주세요.');
+    expect(input).toBeDisabled();
     expect(input).toHaveValue('보존할 질문');
     expect(screen.getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
   });
@@ -545,7 +540,7 @@ describe('질문 MSW 계약', () => {
       body: JSON.stringify({ question }),
     });
 
-  it('처리 중 중복 요청은 409이며 저장된 완료 기록의 식별자가 유지된다', async () => {
+  it('백엔드와 같이 동시 전송을 허용하며 각 기록의 식별자를 유지한다', async () => {
     const pending = send('  질문  ');
     const detail = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
     expect(detail.messages[0]).toMatchObject({
@@ -554,11 +549,11 @@ describe('질문 MSW 계약', () => {
       answer: null,
       finished_at: null,
     });
-    await expect(send('중복 질문')).rejects.toMatchObject({ status: 409 });
-    const result = await pending;
+    const second = send('중복 질문');
+    const [result, secondResult] = await Promise.all([pending, second]);
     expect(result).toMatchObject({ question: '질문', status: 'completed', error_code: null });
     const saved = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
-    expect(saved.messages).toEqual([result]);
+    expect(saved.messages).toEqual([result, secondResult]);
   });
 
   it.each([' ', null, 123])('유효하지 않은 질문 %s는 저장하지 않는다', async (question) => {

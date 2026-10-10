@@ -110,11 +110,13 @@ const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
 // 동일한 시각·내용의 로그도 각각 한 건으로 표시한다.
 adminSystemLogs.splice(1, 0, { ...adminSystemLogs[0] });
 
-function getAdminSessions(store: Map<string, ChatDetail>) {
+type MockChat = ChatDetail & { user_id: number; deleted_at: string | null };
+
+function getAdminSessions(store: Map<string, MockChat>) {
   return sortSessions([...store.values()]).map((chat) => ({
     chat_id: chat.chat_id,
-    user_id: chat.chat_id === exampleChats[1].chat_id ? 2 : 1,
-    title: chat.messages[0]?.question.slice(0, 40) || '새 대화',
+    user_id: chat.user_id,
+    title: chat.messages[0]?.question ?? '',
     created_at: chat.created_at,
     message_count: chat.messages.length,
   }));
@@ -171,19 +173,25 @@ const revokedTokens = new Set<string>();
 export function createMockLoginResponse(
   expiresIn = 1800,
   role: CurrentUser['role'] = 'user',
+  userId = role === 'admin' ? 1 : 2,
 ): LoginResponse {
   // 미리보기 새로고침 후에도 유효한 토큰을 확인할 수 있도록 만료 시각을 포함한다.
-  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}.${role}`;
+  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}.${role}.${userId}`;
   return { access_token: token, token_type: 'bearer', expires_in: expiresIn };
 }
 
 function authenticationError(request: Request) {
   const token = request.headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
   const match =
-    /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)\.(user|admin)$/.exec(
+    /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)\.(user|admin)(?:\.(\d+))?$/.exec(
       token,
     );
-  if (!match || Number(match[1]) <= Date.now() || revokedTokens.has(token))
+  if (
+    !match ||
+    Number(match[1]) <= Date.now() ||
+    revokedTokens.has(token) ||
+    !adminUsers.some((member) => member.id === Number(match[3] ?? (match[2] === 'admin' ? 1 : 2)))
+  )
     return chatError('UNAUTHORIZED', '로그인이 필요합니다.', 401);
   return null;
 }
@@ -197,13 +205,16 @@ function adminAuthenticationError(request: Request) {
 }
 
 function mockCurrentUser(request: Request): CurrentUser {
-  const admin = request.headers.get('Authorization')!.endsWith('.admin');
+  const token = request.headers.get('Authorization')!;
+  const match = /\.(user|admin)(?:\.(\d+))?$/.exec(token)!;
+  const id = Number(match[2] ?? (match[1] === 'admin' ? 1 : 2));
+  const member = adminUsers.find((item) => item.id === id)!;
   return {
-    id: admin ? 1 : 2,
-    username: admin ? 'admin' : 'friend',
-    name: admin ? '관리자' : '오리 친구',
-    role: adminUsers.find((member) => member.id === (admin ? 1 : 2))!.role,
-    created_at: '2026-10-05T03:00:00Z',
+    id,
+    username: id === 1 ? 'admin' : id === 2 ? 'friend' : member.username,
+    name: id === 1 ? '관리자' : id === 2 ? '오리 친구' : member.name,
+    role: member.role,
+    created_at: member.created_at,
     last_login_at: '2026-10-09T03:00:00Z',
   };
 }
@@ -217,7 +228,9 @@ export function resetAuthMocks() {
 function makeChatStore() {
   const items =
     import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'empty' ? [] : structuredClone(exampleChats);
-  return new Map(items.map((chat) => [chat.chat_id, chat]));
+  return new Map<string, MockChat>(
+    items.map((chat) => [chat.chat_id, { ...chat, user_id: 2, deleted_at: null }]),
+  );
 }
 
 export function resetChatMocks() {
@@ -367,7 +380,11 @@ export const handlers = [
     await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
     if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'list-error')
       return chatError('DB_ERROR', '대화 목록을 불러오지 못했어요.', 500);
-    const items = sortSessions([...store.values()]).map(({ chat_id, created_at }) => ({
+    const items = sortSessions(
+      [...store.values()].filter(
+        (chat) => !chat.deleted_at && chat.user_id === mockCurrentUser(request).id,
+      ),
+    ).map(({ chat_id, created_at }) => ({
       chat_id,
       created_at,
     }));
@@ -381,7 +398,12 @@ export const handlers = [
     if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'create-error')
       return chatError('DB_ERROR', '대화를 만들지 못했어요. 다시 시도해 주세요.', 500);
     const session = { chat_id: crypto.randomUUID(), created_at: new Date().toISOString() };
-    store.set(session.chat_id, { ...session, messages: [] });
+    store.set(session.chat_id, {
+      ...session,
+      user_id: mockCurrentUser(request).id,
+      deleted_at: null,
+      messages: [],
+    });
     return HttpResponse.json(session, { status: 201 });
   }),
   http.get(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
@@ -394,8 +416,12 @@ export const handlers = [
     if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'detail-error')
       return chatError('DB_ERROR', '대화를 불러오지 못했어요.', 500);
     const chat = store.get(String(params.chatId));
-    return chat
-      ? HttpResponse.json(chat)
+    return chat && !chat.deleted_at && chat.user_id === mockCurrentUser(request).id
+      ? HttpResponse.json({
+          chat_id: chat.chat_id,
+          created_at: chat.created_at,
+          messages: chat.messages,
+        })
       : chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
   }),
   http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
@@ -408,12 +434,14 @@ export const handlers = [
     await delay(scenario === 'slow' ? 1500 : 600);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
-    if (!store.has(id)) return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+    const chat = store.get(id);
+    if (!chat || chat.deleted_at || chat.user_id !== mockCurrentUser(request).id)
+      return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
     if (scenario === 'delete-error' && !failures.has(id)) {
       failures.add(id);
       return chatError('DB_ERROR', '대화를 삭제하지 못했어요. 다시 시도해 주세요.', 500);
     }
-    store.delete(id);
+    chat.deleted_at = new Date().toISOString();
     return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/chats/:chatId/messages`, async ({ params, request }) => {
@@ -426,15 +454,14 @@ export const handlers = [
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(chatId))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
     const chat = store.get(chatId);
-    if (!chat) return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+    if (!chat || chat.deleted_at || chat.user_id !== mockCurrentUser(request).id)
+      return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
     const body: unknown = await request.json().catch(() => null);
     const question =
       body && typeof body === 'object' && 'question' in body && typeof body.question === 'string'
         ? body.question.trim()
         : '';
     if (!question) return chatError('INVALID_INPUT', '메시지를 입력해 주세요.', 422);
-    if (chat.messages.some((message) => message.status === 'pending'))
-      return chatError('CHAT_BUSY', '이전 답변을 기다린 뒤 다시 보내 주세요.', 409);
 
     const message: ChatMessage = {
       request_id: crypto.randomUUID(),

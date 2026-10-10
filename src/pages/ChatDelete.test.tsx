@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatSession } from '../lib/chats';
@@ -19,33 +19,6 @@ const emptyId = '7b9e0398-6b3e-4b88-87db-358748803b75';
 const firstDelete = '10월 5일 오후 12:00 대화 삭제';
 const emptyDelete = '10월 3일 오전 10:30 대화 삭제';
 
-// jsdom은 네이티브 dialog의 열기·닫기를 구현하지 않는다.
-const dialogMethods = ['showModal', 'close'] as const;
-const originalMethods = dialogMethods.map((name) =>
-  Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name),
-);
-beforeAll(() => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.setAttribute('open', '');
-    },
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.removeAttribute('open');
-      this.dispatchEvent(new Event('close'));
-    },
-  });
-});
-afterAll(() => {
-  dialogMethods.forEach((name, index) => {
-    const original = originalMethods[index];
-    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
-    else delete HTMLDialogElement.prototype[name];
-  });
-});
 afterEach(() => {
   vi.unstubAllEnvs();
   resetChatMocks();
