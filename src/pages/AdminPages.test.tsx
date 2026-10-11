@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type {
@@ -14,6 +14,10 @@ import type {
 } from '../lib/admin';
 import type { ChatMessage, ChatSession } from '../lib/chats';
 import { server } from '../mocks/server';
+import { createMockLoginResponse } from '../mocks/handlers';
+import { signIn } from '../lib/auth';
+
+beforeEach(() => signIn(createMockLoginResponse(1800, 'admin')));
 
 const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const secondId = '6eb321dc-235c-4e3d-a95e-43f2a601fcd8';
@@ -44,8 +48,6 @@ function renderPage(path = '/admin/users') {
   return userEvent.setup();
 }
 
-afterEach(() => vi.unstubAllEnvs());
-
 describe('관리자 회원·세션 조회', () => {
   it('관리자 시작 주소에서 회원 목록으로 이동하고 서비스로 돌아간다', async () => {
     const user = renderPage('/admin');
@@ -73,20 +75,20 @@ describe('관리자 회원·세션 조회', () => {
 
   it('회원 상세에서 회원별 세션과 해당 대화만 조회한다', async () => {
     const user = renderPage();
-    await user.click(await screen.findByRole('link', { name: '사용자A 회원 상세' }));
+    await user.click(await screen.findByRole('link', { name: '사용자B 회원 상세' }));
     const sessions = await screen.findByRole('region', { name: '회원 대화 세션 표' });
     expect(within(sessions).getByText(firstId)).toBeInTheDocument();
-    expect(within(sessions).queryByText(secondId)).not.toBeInTheDocument();
+    expect(within(sessions).getByText(secondId)).toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '오늘 하루가 조금 지쳤어. 대화 보기' }));
     const chat = await screen.findByRole('list', { name: '대화 기록' });
     expect(within(chat).getByText('기분 전환할 만한 작은 일이 있을까?')).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '메시지' })).not.toBeInTheDocument();
-    await user.click(screen.getByRole('link', { name: '회원 1' }));
+    await user.click(screen.getByRole('link', { name: '회원 번호(PK) 2' }));
     await user.click(await screen.findByRole('link', { name: '회원 대화 기록' }));
     const logs = await screen.findByRole('region', { name: '대화 기록 표' });
     expect(within(logs).getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
-    expect(screen.queryByText('주말 계획을 같이 세워 줄래?')).not.toBeInTheDocument();
-    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('user_id=1');
+    expect(screen.getByText('주말 계획을 같이 세워 줄래?')).toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('user_id=2');
   });
 
   it('로그인 기록이 없는 회원과 세션이 없는 회원을 표시한다', async () => {
@@ -123,9 +125,9 @@ describe('관리자 회원·세션 조회', () => {
 
   it.each(['/admin/users/abc', '/admin/sessions/abc'])(
     '잘못된 대상 주소 %s를 요청 전에 표시한다',
-    (path) => {
+    async (path) => {
       renderPage(path);
-      expect(screen.getByRole('alert')).toHaveTextContent('주소를 확인해 주세요.');
+      expect(await screen.findByRole('alert')).toHaveTextContent('주소를 확인해 주세요.');
       expect(screen.queryByText('불러오는 중')).not.toBeInTheDocument();
     },
   );
@@ -139,7 +141,13 @@ describe('관리자 회원·세션 조회', () => {
           return HttpResponse.json({ error: { message: '회원 조회 실패' } }, { status: 500 });
         return HttpResponse.json({
           items: [
-            { id: 99, name: '재시도 회원', username: 'retry', created_at: '2026-10-05T03:00:00Z' },
+            {
+              id: 99,
+              name: '재시도 회원',
+              username: 'retry',
+              role: 'user',
+              created_at: '2026-10-05T03:00:00Z',
+            },
           ],
           total: 1,
           page: 1,
@@ -152,6 +160,42 @@ describe('관리자 회원·세션 조회', () => {
     await user.click(screen.getByRole('button', { name: '다시 불러오기' }));
     await screen.findByRole('link', { name: '재시도 회원 회원 상세' });
     expect(calls).toBe(2);
+  });
+
+  it('회원 상세 응답을 기다리지 않고 세션 목록을 병렬로 요청한다', async () => {
+    let release!: () => void;
+    let sessionsStarted = false;
+    const deferred = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users/3`, async () => {
+        await deferred;
+        return HttpResponse.json({
+          id: 3,
+          name: '병렬 조회 회원',
+          username: 'parallel',
+          role: 'user',
+          created_at: '2026-10-05T03:00:00Z',
+          last_login_at: null,
+        });
+      }),
+      http.get(`${API_BASE_URL}/api/v1/admin/sessions`, ({ request }) => {
+        expect(new URL(request.url).searchParams.get('user_id')).toBe('3');
+        sessionsStarted = true;
+        return HttpResponse.json({ items: [], total: 0, page: 1, size: 20 });
+      }),
+    );
+    renderPage('/admin/users/3');
+    try {
+      await waitFor(() => expect(sessionsStarted).toBe(true));
+      expect(screen.queryByRole('region', { name: '회원 정보' })).not.toBeInTheDocument();
+      release();
+      await screen.findByRole('heading', { name: '병렬 조회 회원' });
+      expect(screen.getByText('대화 세션이 없어요.')).toBeInTheDocument();
+    } finally {
+      release();
+    }
   });
 
   it('이전 회원 응답이 늦게 와도 현재 회원을 바꾸지 않는다', async () => {
@@ -168,6 +212,7 @@ describe('관리자 회원·세션 조회', () => {
           id: 1,
           name: '이전 회원',
           username: 'old',
+          role: 'user',
           created_at: '2026-10-05T03:00:00Z',
           last_login_at: null,
         });
@@ -204,11 +249,11 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     );
     const user = renderPage('/admin/logs?page=2&size=10');
     await screen.findByText('조건에 맞는 대화 기록이 없어요.');
-    await user.type(screen.getByRole('textbox', { name: '회원 ID' }), '2');
-    fireEvent.change(screen.getByLabelText('시작 시각 (KST)'), {
+    await user.type(screen.getByRole('textbox', { name: '회원 번호(PK)' }), '2');
+    fireEvent.change(screen.getByLabelText('조회 시작 시각 (KST)'), {
       target: { value: '2026-10-04T14:20:00' },
     });
-    fireEvent.change(screen.getByLabelText('종료 시각 (KST)'), {
+    fireEvent.change(screen.getByLabelText('조회 종료 시각 (KST)'), {
       target: { value: '2026-10-04T14:23:00' },
     });
     await user.click(screen.getByRole('button', { name: '조회' }));
@@ -229,16 +274,16 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     );
     const user = renderPage('/admin/system-logs');
     await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
-    fireEvent.change(screen.getByLabelText('시작 시각 (KST)'), {
+    fireEvent.change(screen.getByLabelText('조회 시작 시각 (KST)'), {
       target: { value: '2026-10-05T10:00:00' },
     });
-    fireEvent.change(screen.getByLabelText('종료 시각 (KST)'), {
+    fireEvent.change(screen.getByLabelText('조회 종료 시각 (KST)'), {
       target: { value: '2026-10-04T10:00:00' },
     });
     await user.click(screen.getByRole('button', { name: '조회' }));
-    expect(screen.getByRole('alert')).toHaveTextContent('종료 시각은 시작 시각 이후');
+    expect(screen.getByRole('alert')).toHaveTextContent('조회 종료 시각은 조회 시작 시각 이후');
     expect(calls).toBe(1);
-    expect(screen.getByLabelText('시작 시각 (KST)')).toHaveValue('2026-10-05T10:00');
+    expect(screen.getByLabelText('조회 시작 시각 (KST)')).toHaveValue('2026-10-05T10:00');
   });
 
   it('레벨·이벤트 필터와 페이지 상태를 뒤로·앞으로 복원한다', async () => {
@@ -268,7 +313,7 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     const table = await screen.findByRole('region', { name: '시스템 로그 표' });
     expect(within(table).getAllByText('request_received')).toHaveLength(2);
     expect(within(table).getAllByText('—')).toHaveLength(4);
-    expect(screen.getByLabelText('시작 시각 (KST)')).toHaveValue('2026-10-05T16:00');
+    expect(screen.getByLabelText('조회 시작 시각 (KST)')).toHaveValue('2026-10-05T16:00');
     expect(screen.getByText('총 2건 · 1 / 1 페이지')).toBeInTheDocument();
   });
 
@@ -283,7 +328,7 @@ describe('관리자 조회 조건과 시스템 로그', () => {
 
   it('잘못된 URL의 기간·회원 조건을 표시하고 초기화할 수 있다', async () => {
     const user = renderPage('/admin/logs?user_id=wrong&start=invalid');
-    expect(screen.getByRole('alert')).toHaveTextContent('회원 ID는 양의 정수');
+    expect(await screen.findByRole('alert')).toHaveTextContent('회원 번호(PK)는 양의 정수');
     await user.click(screen.getByRole('button', { name: '초기화' }));
     await screen.findByRole('region', { name: '대화 기록 표' });
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
@@ -304,8 +349,12 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
   });
 
-  it('빈 목록 시나리오를 회원 목록에 적용한다', async () => {
-    vi.stubEnv('VITE_ADMIN_MOCK_SCENARIO', 'empty');
+  it('빈 회원 목록과 비활성 다음 버튼을 표시한다', async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, size: 20 }),
+      ),
+    );
     renderPage();
     await screen.findByText('회원이 없어요.');
     expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();
@@ -319,12 +368,15 @@ describe('관리자 MSW API 계약', () => {
     const detail = await apiRequest<AdminSessionDetail>(`/api/v1/admin/sessions/${secondId}`);
     const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=2');
     expect(user.last_login_at).toBeNull();
-    expect(sessions.items.map((session) => session.chat_id)).toEqual([secondId]);
+    expect(sessions.items.map((session) => session.chat_id)).toEqual([firstId, secondId, emptyId]);
     expect(detail.message_count).toBe(detail.messages.length);
-    expect(logs.items.map((log) => log.request_id).sort()).toEqual(
-      detail.messages.map((message) => message.request_id).sort(),
-    );
-    expect(logs.items.every((log) => log.chat_id === secondId)).toBe(true);
+    expect(
+      logs.items
+        .filter((log) => log.chat_id === secondId)
+        .map((log) => log.request_id)
+        .sort(),
+    ).toEqual(detail.messages.map((message) => message.request_id).sort());
+    expect(detail.title).toBe(detail.messages[0].question);
   });
 
   it('기간·레벨·이벤트로 필터한 뒤 전체 수량과 페이지를 계산한다', async () => {
@@ -337,7 +389,7 @@ describe('관리자 MSW API 계약', () => {
       result.items.every((log) => log.level === 'ERROR' && log.event === 'ai_call_failed'),
     ).toBe(true);
     const records = await apiRequest<AdminPage<ChatMessage>>(
-      '/api/v1/admin/logs?user_id=1&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
+      '/api/v1/admin/logs?user_id=2&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
     );
     expect(records.total).toBe(1);
     expect(records.items[0].question).toBe('기분 전환할 만한 작은 일이 있을까?');
@@ -357,14 +409,15 @@ describe('관리자 MSW API 계약', () => {
     expect(detail.message_count).toBe(1);
     expect(detail.messages[0].question).toBe('관리자에서도 조회할 질문');
     await apiRequest(`/api/v1/chats/${session.chat_id}`, { method: 'DELETE' });
-    await expect(apiRequest(`/api/v1/admin/sessions/${session.chat_id}`)).rejects.toMatchObject({
-      status: 404,
-    });
+    const deleted = await apiRequest<AdminSessionDetail>(
+      `/api/v1/admin/sessions/${session.chat_id}`,
+    );
+    expect(deleted.messages).toEqual(detail.messages);
     const logs = await apiRequest<AdminPage<ChatMessage>>('/api/v1/admin/logs?user_id=1');
-    expect(logs.items.some((message) => message.chat_id === session.chat_id)).toBe(false);
+    expect(logs.items.some((message) => message.chat_id === session.chat_id)).toBe(true);
   });
 
-  it('필수 회원 ID·페이지 범위가 잘못되면 422를 반환한다', async () => {
+  it('필수 회원 번호(PK)·페이지 범위가 잘못되면 422를 반환한다', async () => {
     for (const path of [
       '/sessions',
       '/users?size=101',

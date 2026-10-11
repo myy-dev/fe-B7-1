@@ -132,7 +132,6 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
   ];
   return (
     <form
-      key={search.toString()}
       onSubmit={submit}
       className="card border border-base-300 bg-base-100"
       aria-label="조회 조건"
@@ -161,7 +160,7 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
             </>
           ) : (
             <label className="fieldset p-0">
-              회원 ID
+              회원 번호(PK)
               <input
                 name="user_id"
                 inputMode="numeric"
@@ -171,7 +170,7 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
             </label>
           )}
           <label className="fieldset min-w-0 p-0">
-            시작 시각 (KST)
+            조회 시작 시각 (KST)
             <input
               name="start"
               type="datetime-local"
@@ -181,7 +180,7 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
             />
           </label>
           <label className="fieldset min-w-0 p-0">
-            종료 시각 (KST)
+            조회 종료 시각 (KST)
             <input
               name="end"
               type="datetime-local"
@@ -197,7 +196,7 @@ export function AdminFilters({ system = false }: { system?: boolean }) {
           </p>
         )}
         <div className="flex gap-2">
-          <button className="btn btn-primary btn-sm" type="submit">
+          <button className="btn btn-neutral btn-sm" type="submit">
             조회
           </button>
           <button

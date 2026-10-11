@@ -3,49 +3,20 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatSession } from '../lib/chats';
-import { resetChatMocks } from '../mocks/handlers';
 import { server } from '../mocks/server';
+import { createMockLoginResponse } from '../mocks/handlers';
+import { getAccessToken, signIn } from '../lib/auth';
+
+beforeEach(() => signIn(createMockLoginResponse()));
 
 const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const emptyId = '7b9e0398-6b3e-4b88-87db-358748803b75';
 const firstDelete = '10월 5일 오후 12:00 대화 삭제';
 const emptyDelete = '10월 3일 오전 10:30 대화 삭제';
-
-// jsdom은 네이티브 dialog의 열기·닫기를 구현하지 않는다.
-const dialogMethods = ['showModal', 'close'] as const;
-const originalMethods = dialogMethods.map((name) =>
-  Object.getOwnPropertyDescriptor(HTMLDialogElement.prototype, name),
-);
-beforeAll(() => {
-  Object.defineProperty(HTMLDialogElement.prototype, 'showModal', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.setAttribute('open', '');
-    },
-  });
-  Object.defineProperty(HTMLDialogElement.prototype, 'close', {
-    configurable: true,
-    value(this: HTMLDialogElement) {
-      this.removeAttribute('open');
-      this.dispatchEvent(new Event('close'));
-    },
-  });
-});
-afterAll(() => {
-  dialogMethods.forEach((name, index) => {
-    const original = originalMethods[index];
-    if (original) Object.defineProperty(HTMLDialogElement.prototype, name, original);
-    else delete HTMLDialogElement.prototype[name];
-  });
-});
-afterEach(() => {
-  vi.unstubAllEnvs();
-  resetChatMocks();
-});
 
 function CurrentPath() {
   return <output aria-label="현재 경로">{useLocation().pathname}</output>;
@@ -68,6 +39,46 @@ async function openDelete(user: ReturnType<typeof userEvent.setup>, name = first
 }
 
 describe('대화 삭제', () => {
+  beforeEach(() => vi.stubEnv('VITE_ENABLE_MSW', 'false'));
+
+  it('실제 API 모드에서 Bearer 토큰으로 삭제하고 204 응답을 반영한다', async () => {
+    let calls = 0;
+    let authorization: string | null = null;
+    server.use(
+      http.delete(`${API_BASE_URL}/api/v1/chats/${firstId}`, ({ request }) => {
+        calls++;
+        authorization = request.headers.get('Authorization');
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+    const user = renderPage();
+    const dialog = await openDelete(user);
+    await user.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+    expect(calls).toBe(1);
+    expect(authorization).toBe(`Bearer ${getAccessToken()}`);
+    expect(
+      screen.queryByRole('link', { name: '10월 5일 오후 12:00 대화' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('삭제 요청의 401 응답에서 인증을 정리하고 로그인 화면으로 이동한다', async () => {
+    server.use(
+      http.delete(`${API_BASE_URL}/api/v1/chats/${firstId}`, () =>
+        HttpResponse.json(
+          { error: { code: 'UNAUTHORIZED', message: '로그인이 필요합니다.' } },
+          { status: 401 },
+        ),
+      ),
+    );
+    const user = renderPage(`/chats/${firstId}`);
+    const dialog = await openDelete(user);
+    await user.click(within(dialog).getByRole('button', { name: '삭제' }));
+    await waitFor(() => expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/login'));
+    expect(getAccessToken()).toBeNull();
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('개발 모드의 반복 effect 실행에서도 확인창을 유지한다', async () => {
     const user = renderPage('/chats', true);
     const dialog = await openDelete(user);
@@ -134,12 +145,11 @@ describe('대화 삭제', () => {
   });
 
   it('홈에서도 마지막 대화 삭제 후 빈 목록과 새 대화 시작을 제공한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats`, () => HttpResponse.json({ items: [] })));
     const user = renderPage();
-    await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
+    await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     await screen.findByRole('textbox', { name: '메시지' });
-    await user.click(screen.getByRole('link', { name: '처음 화면' }));
+    await user.click(screen.getByRole('link', { name: '꽥꽥이 처음 화면' }));
     const button = screen.getByRole('button', { name: /대화 삭제$/ });
     await user.click(button);
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: '삭제' }));
@@ -151,7 +161,17 @@ describe('대화 삭제', () => {
   });
 
   it('삭제 실패 시 확인창·목록·선택을 유지하고 재시도한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'delete-error');
+    server.use(
+      http.delete(
+        `${API_BASE_URL}/api/v1/chats/${firstId}`,
+        () =>
+          HttpResponse.json(
+            { error: { code: 'DB_ERROR', message: '삭제 실패', request_id: 'delete-failed' } },
+            { status: 500 },
+          ),
+        { once: true },
+      ),
+    );
     const user = renderPage(`/chats/${firstId}`);
     await screen.findByText('오늘 하루가 조금 지쳤어.');
     const dialog = await openDelete(user);
@@ -222,8 +242,6 @@ describe('대화 삭제', () => {
   });
 
   it('늦은 목록 응답이 삭제한 새 세션을 다시 표시하지 않는다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
     let release: (() => void) | undefined;
     let stale: ChatSession | undefined;
     server.use(
@@ -290,7 +308,7 @@ describe('대화 삭제', () => {
   });
 });
 
-describe('삭제 MSW 임시 계약', () => {
+describe('삭제 API 모킹 계약', () => {
   it('204로 삭제 후 목록·상세·전송에서도 제거되고 재삭제는 404다', async () => {
     await expect(
       apiRequest(`/api/v1/chats/${firstId}`, { method: 'DELETE' }),

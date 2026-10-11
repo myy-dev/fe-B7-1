@@ -21,7 +21,9 @@ export default function AdminSessionPage() {
           </li>
           {resource.data && (
             <li>
-              <Link to={`/admin/users/${resource.data.user_id}`}>회원 {resource.data.user_id}</Link>
+              <Link to={`/admin/users/${resource.data.user_id}`}>
+                회원 번호(PK) {resource.data.user_id}
+              </Link>
             </li>
           )}
           <li>세션 상세</li>
@@ -38,7 +40,9 @@ export default function AdminSessionPage() {
         <section aria-label="세션 대화" className="card min-w-0 border border-base-300 bg-base-100">
           <div className="card-body gap-6 p-5 sm:p-8">
             <header className="space-y-2 border-b border-base-300 pb-4">
-              <h2 className="text-lg font-bold wrap-anywhere">{resource.data.title}</h2>
+              <h2 className="text-lg font-bold wrap-anywhere">
+                {resource.data.title || '새 대화'}
+              </h2>
               <p className="font-mono text-xs wrap-anywhere text-base-content/60">
                 {resource.data.chat_id}
               </p>
@@ -49,7 +53,7 @@ export default function AdminSessionPage() {
             {resource.data.messages.length ? (
               <ChatMessages
                 messages={resource.data.messages}
-                questionAuthor={`회원 ${resource.data.user_id}`}
+                questionAuthor={`회원 번호(PK) ${resource.data.user_id}`}
               />
             ) : (
               <p role="status" className="py-8 text-center text-base-content/70">

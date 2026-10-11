@@ -5,19 +5,29 @@ import type { ChatSession } from '../lib/chats';
 
 interface NewChatButtonProps {
   label?: string;
+  selection?: string;
   onCreated: (session: ChatSession) => void;
 }
 
-export default function NewChatButton({ label = '새 대화', onCreated }: NewChatButtonProps) {
+export default function NewChatButton({
+  label = '새 대화',
+  onCreated,
+  selection,
+}: NewChatButtonProps) {
   const navigate = useNavigate();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
   const request = useRef<AbortController | null>(null);
 
+  const selectionVersion = useRef(0);
+  useEffect(() => {
+    selectionVersion.current += 1;
+  }, [selection]);
   useEffect(() => () => request.current?.abort(), []);
 
   async function createChat() {
     if (request.current) return;
+    const startingSelection = selectionVersion.current;
     const controller = new AbortController();
     request.current = controller;
     setPending(true);
@@ -29,7 +39,8 @@ export default function NewChatButton({ label = '새 대화', onCreated }: NewCh
       });
       if (controller.signal.aborted) return;
       onCreated(session);
-      navigate(`/chats/${encodeURIComponent(session.chat_id)}`);
+      if (selectionVersion.current === startingSelection)
+        navigate(`/chats/${encodeURIComponent(session.chat_id)}`);
     } catch (cause) {
       if (!controller.signal.aborted) {
         setError(

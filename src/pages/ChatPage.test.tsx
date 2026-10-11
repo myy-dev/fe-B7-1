@@ -2,12 +2,16 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatMessage, ChatSession } from '../lib/chats';
 import { resetChatMocks } from '../mocks/handlers';
 import { server } from '../mocks/server';
+import { createMockLoginResponse } from '../mocks/handlers';
+import { signIn } from '../lib/auth';
+
+beforeEach(() => signIn(createMockLoginResponse()));
 
 const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const secondId = '6eb321dc-235c-4e3d-a95e-43f2a601fcd8';
@@ -27,16 +31,10 @@ function CurrentPath() {
   return <output aria-label="현재 경로">{useLocation().pathname}</output>;
 }
 
-afterEach(() => {
-  vi.unstubAllEnvs();
-  resetChatMocks();
-});
-
 describe('채팅 세션 화면', () => {
   it('홈에서 목록을 조회하고 기존 대화로 이동한다', async () => {
     const user = renderPage();
-    expect(screen.getByRole('button', { name: '새 대화 시작' })).toBeInTheDocument();
-    expect(screen.getByText('대화 목록 불러오는 중')).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: '새 대화 시작' })).toBeInTheDocument();
     const nav = await screen.findByRole('navigation', { name: '대화 목록' });
     const links = within(nav).getAllByRole('link');
     expect(links.map((link) => link.getAttribute('href'))).toEqual([
@@ -93,8 +91,7 @@ describe('채팅 세션 화면', () => {
   });
 
   it('빈 목록에서도 새 대화를 만들 수 있다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats`, () => HttpResponse.json({ items: [] })));
     const user = renderPage();
     await screen.findByText('아직 대화가 없어요.');
     await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
@@ -256,9 +253,10 @@ describe('채팅 세션 화면', () => {
       const nav = screen.getByRole('navigation', { name: '대화 목록' });
       await user.click(within(nav).getAllByRole('link')[1]);
       await screen.findByText('주말 계획을 같이 세워 줄래?');
-      expect(signal?.aborted).toBe(true);
+      expect(signal?.aborted).toBe(false);
       release?.();
-      await user.tab();
+      await waitFor(() => expect(screen.getByRole('button', { name: '새 대화' })).toBeEnabled());
+      expect(within(nav).getAllByRole('link')).toHaveLength(4);
       expect(screen.getByLabelText('현재 경로')).toHaveTextContent(`/chats/${secondId}`);
       expect(screen.getByRole('button', { name: '새 대화' })).toBeEnabled();
     } finally {
@@ -302,9 +300,51 @@ describe('채팅 MSW 계약', () => {
 });
 
 describe('질문 전송', () => {
+  it('1,000자를 넘는 붙여넣기를 자르고 추가 입력을 막으며 삭제 후 다시 입력할 수 있다', async () => {
+    const user = renderPage(`/chats/${emptyId}`);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    await user.click(input);
+    await user.paste('가'.repeat(1005));
+    expect(input).toHaveValue('가'.repeat(1000));
+    expect(input).toHaveAccessibleDescription('1,000 / 1,000');
+    await user.keyboard('더');
+    expect(input).toHaveValue('가'.repeat(1000));
+    await user.keyboard('{Backspace}나');
+    expect(input).toHaveValue(`${'가'.repeat(999)}나`);
+  });
+
+  it('제한 길이의 질문을 전송하고 성공하면 입력과 글자 수를 초기화한다', async () => {
+    let payload: unknown;
+    const question = '가'.repeat(1000);
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+        payload = await request.json();
+        return HttpResponse.json({
+          request_id: 'limited-question',
+          chat_id: emptyId,
+          question,
+          answer: '질문을 받았어요.',
+          status: 'completed',
+          error_code: null,
+          created_at: '2026-10-05T03:00:00Z',
+          finished_at: '2026-10-05T03:00:01Z',
+        });
+      }),
+    );
+    const user = renderPage(`/chats/${emptyId}`);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    await user.click(input);
+    await user.paste(`${question}초과`);
+    await user.click(screen.getByRole('button', { name: '보내기' }));
+    await screen.findByText('질문을 받았어요.');
+    expect(payload).toEqual({ question });
+    expect(input).toHaveValue('');
+    expect(input).toHaveAccessibleDescription('0 / 1,000');
+  });
+
   it('새 대화에서 공백을 막고 한 번 전송한 질문과 답변을 저장·조회한다', async () => {
     const user = renderPage();
-    await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
+    await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     const input = await screen.findByRole('textbox', { name: '메시지' });
     const button = screen.getByRole('button', { name: '보내기' });
     expect(button).toBeDisabled();
@@ -369,10 +409,41 @@ describe('질문 전송', () => {
     expect(payload).toEqual({ question: '한글 질문\n둘째 줄' });
   });
 
-  it.each(['send-error', 'timeout'])(
+  it.each([
+    ['AI_UNAVAILABLE', 502, '답변을 받지 못했어요. 다시 보내 주세요.'],
+    ['AI_TIMEOUT', 504, '응답 시간이 초과되었어요. 다시 보내 주세요.'],
+  ] as const)(
     '%s 실패 기록과 입력을 유지하고 다시 보내면 성공한다',
-    async (scenario) => {
-      vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', scenario);
+    async (code, status, errorMessage) => {
+      const detail: ChatDetail = {
+        chat_id: emptyId,
+        created_at: '2026-10-05T03:00:00Z',
+        messages: [],
+      };
+      server.use(
+        http.get(`${API_BASE_URL}/api/v1/chats/${emptyId}`, () => HttpResponse.json(detail)),
+        http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+          const { question } = (await request.json()) as { question: string };
+          const failed = detail.messages.length === 0;
+          const message: ChatMessage = {
+            request_id: crypto.randomUUID(),
+            chat_id: emptyId,
+            question,
+            answer: failed ? null : '이야기해 줘서 고마워요.',
+            status: failed ? 'failed' : 'completed',
+            error_code: failed ? code : null,
+            created_at: new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+          };
+          detail.messages.push(message);
+          return failed
+            ? HttpResponse.json(
+                { error: { code, message: errorMessage, request_id: message.request_id } },
+                { status },
+              )
+            : HttpResponse.json(message, { status: 201 });
+        }),
+      );
       const user = renderPage(`/chats/${emptyId}`);
       const input = await screen.findByRole('textbox', { name: '메시지' });
       await user.type(input, '다시 이야기해 볼까?');
@@ -385,8 +456,8 @@ describe('질문 전송', () => {
       await user.click(screen.getByRole('button', { name: '보내기' }));
       await screen.findByText(/이야기해 줘서 고마워요/);
       expect(input).toHaveValue('');
-      const detail = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
-      expect(detail.messages.map((message) => message.status)).toEqual(['failed', 'completed']);
+      const saved = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
+      expect(saved.messages.map((message) => message.status)).toEqual(['failed', 'completed']);
     },
   );
 
@@ -399,20 +470,14 @@ describe('질문 전송', () => {
     await user.type(input, '보존할 질문');
     await user.click(screen.getByRole('button', { name: '보내기' }));
     await screen.findByText('메시지를 보내지 못했어요. 다시 시도해 주세요.');
+    await screen.findByText('전송 결과를 확인하고 있어요. 확인 전에는 다시 보내지 마세요.');
+    expect(await screen.findByRole('button', { name: '보내기' })).toBeDisabled();
     expect(input).toHaveValue('보존할 질문');
     expect(screen.getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
-    server.use(
-      http.post(`${API_BASE_URL}/api/v1/chats/${firstId}/messages`, () =>
-        HttpResponse.json(
-          { error: { code: 'DB_ERROR', message: '저장 실패', request_id: 'failed' } },
-          { status: 500 },
-        ),
-      ),
-      http.get(`${API_BASE_URL}/api/v1/chats/${firstId}`, () => HttpResponse.error()),
-    );
-    await user.click(screen.getByRole('button', { name: '보내기' }));
-    await screen.findByText('저장 실패');
-    await waitFor(() => expect(input).toBeEnabled());
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats/${firstId}`, () => HttpResponse.error()));
+    await user.click(screen.getByRole('button', { name: '기록 다시 확인' }));
+    await screen.findByText('기록을 확인하지 못했어요. 다시 확인해 주세요.');
+    expect(input).toBeDisabled();
     expect(input).toHaveValue('보존할 질문');
     expect(screen.getByText('오늘 하루가 조금 지쳤어.')).toBeInTheDocument();
   });
@@ -432,18 +497,45 @@ describe('질문 전송', () => {
     expect(input).toHaveValue('');
   });
 
-  it('느린 응답에 대기 안내를 표시하고 성공 후 정리한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'slow');
+  it('느린 응답에도 생성 중 표시와 입력 잠금을 유지하고 성공 후 정리한다', async () => {
+    let release: (() => void) | undefined;
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+        const { question } = (await request.json()) as { question: string };
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json(
+          {
+            request_id: 'slow-response',
+            chat_id: emptyId,
+            question,
+            answer: '이야기해 줘서 고마워요.',
+            status: 'completed',
+            error_code: null,
+            created_at: '2026-10-05T03:00:00Z',
+            finished_at: '2026-10-05T03:00:01Z',
+          },
+          { status: 201 },
+        );
+      }),
+    );
     const user = renderPage(`/chats/${emptyId}`);
-    const input = await screen.findByRole('textbox', { name: '메시지' }, { timeout: 2500 });
-    await user.type(input, '천천히 답해 줘');
-    await user.click(screen.getByRole('button', { name: '보내기' }));
-    await screen.findByText('답변을 기다리고 있어요.', {}, { timeout: 2500 });
-    expect(input).toBeDisabled();
-    await screen.findByText(/이야기해 줘서 고마워요/, {}, { timeout: 2500 });
-    expect(screen.queryByText('답변을 기다리고 있어요.')).not.toBeInTheDocument();
-    expect(input).toBeEnabled();
-  }, 10000);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    try {
+      await user.type(input, '천천히 답해 줘');
+      await user.click(screen.getByRole('button', { name: '보내기' }));
+      await waitFor(() => expect(release).toBeDefined());
+      expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
+      expect(input).toBeDisabled();
+      release?.();
+      await screen.findByText(/이야기해 줘서 고마워요/);
+      expect(screen.queryByText('답변 생성 중')).not.toBeInTheDocument();
+      expect(input).toBeEnabled();
+    } finally {
+      release?.();
+    }
+  });
 
   it('전송 중 세션을 바꾸면 이전 요청을 중단하고 늦은 답변을 섞지 않는다', async () => {
     let release: (() => void) | undefined;
@@ -500,7 +592,7 @@ describe('질문 MSW 계약', () => {
       body: JSON.stringify({ question }),
     });
 
-  it('처리 중 중복 요청은 409이며 저장된 완료 기록의 식별자가 유지된다', async () => {
+  it('백엔드와 같이 동시 전송을 허용하며 각 기록의 식별자를 유지한다', async () => {
     const pending = send('  질문  ');
     const detail = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
     expect(detail.messages[0]).toMatchObject({
@@ -509,11 +601,11 @@ describe('질문 MSW 계약', () => {
       answer: null,
       finished_at: null,
     });
-    await expect(send('중복 질문')).rejects.toMatchObject({ status: 409 });
-    const result = await pending;
+    const second = send('중복 질문');
+    const [result, secondResult] = await Promise.all([pending, second]);
     expect(result).toMatchObject({ question: '질문', status: 'completed', error_code: null });
     const saved = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
-    expect(saved.messages).toEqual([result]);
+    expect(saved.messages).toEqual([result, secondResult]);
   });
 
   it.each([' ', null, 123])('유효하지 않은 질문 %s는 저장하지 않는다', async (question) => {

@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { Link } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { ApiError, apiRequest } from '../lib/api';
-
-type CheckStatus = 'idle' | 'checking' | 'available' | 'taken' | 'error';
+import { isValidSignupPassword } from '../lib/auth';
 
 export default function SignupPage() {
+  const navigate = useNavigate();
   const [name, setName] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [passwordConfirm, setPasswordConfirm] = useState('');
-  const [checkStatus, setCheckStatus] = useState<CheckStatus>('idle');
-  const [checkMessage, setCheckMessage] = useState('');
   const [errors, setErrors] = useState({
     name: '',
     username: '',
@@ -19,74 +17,36 @@ export default function SignupPage() {
   });
   const [pending, setPending] = useState(false);
   const [error, setError] = useState('');
-  const [complete, setComplete] = useState(false);
-  const checkRequest = useRef<AbortController | null>(null);
   const signupRequest = useRef<AbortController | null>(null);
 
-  useEffect(
-    () => () => {
-      checkRequest.current?.abort();
-      signupRequest.current?.abort();
-    },
-    [],
-  );
+  useEffect(() => () => signupRequest.current?.abort(), []);
 
   function changeUsername(value: string) {
-    checkRequest.current?.abort();
-    checkRequest.current = null;
     setUsername(value);
-    setCheckStatus('idle');
-    setCheckMessage('');
     setErrors((current) => ({ ...current, username: '' }));
     setError('');
-  }
-
-  async function checkUsername() {
-    if (checkRequest.current || signupRequest.current) return;
-    if (!username.trim()) {
-      setErrors((current) => ({ ...current, username: '아이디를 입력해 주세요.' }));
-      return;
-    }
-    const controller = new AbortController();
-    checkRequest.current = controller;
-    setCheckStatus('checking');
-    setCheckMessage('아이디를 확인하고 있어요.');
-    setErrors((current) => ({ ...current, username: '' }));
-    setError('');
-    try {
-      // 회원 API 확정 전의 퍼블리싱용 임시 계약.
-      const result = await apiRequest<{ available: boolean }>(
-        `/api/v1/users/check-username?username=${encodeURIComponent(username.trim())}`,
-        { signal: controller.signal },
-      );
-      if (controller.signal.aborted) return;
-      setCheckStatus(result.available ? 'available' : 'taken');
-      setCheckMessage(
-        result.available ? '사용할 수 있는 아이디예요.' : '이미 사용 중인 아이디예요.',
-      );
-    } catch (cause) {
-      if (controller.signal.aborted) return;
-      setCheckStatus('error');
-      setCheckMessage(
-        cause instanceof ApiError ? cause.message : '확인하지 못했어요. 다시 시도해 주세요.',
-      );
-    } finally {
-      if (checkRequest.current === controller) checkRequest.current = null;
-    }
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (signupRequest.current || checkRequest.current) return;
+    if (signupRequest.current) return;
     const nextErrors = {
-      name: name.trim() ? '' : '이름을 입력해 주세요.',
-      username: !username.trim()
-        ? '아이디를 입력해 주세요.'
-        : checkStatus !== 'available'
-          ? '아이디 중복 확인을 완료해 주세요.'
+      name: !name.trim()
+        ? '이름을 입력해 주세요.'
+        : [...name.trim()].length > 50
+          ? '이름은 50자 이내로 입력해 주세요.'
           : '',
-      password: password.trim() ? '' : '비밀번호를 입력해 주세요.',
-      passwordConfirm: !passwordConfirm.trim()
+      username: !username
+        ? '아이디를 입력해 주세요.'
+        : username.length < 4 || username.length > 20 || /[^a-zA-Z0-9_]/.test(username)
+          ? '아이디는 영문·숫자·밑줄로 4~20자 입력해 주세요.'
+          : '',
+      password: !password
+        ? '비밀번호를 입력해 주세요.'
+        : !isValidSignupPassword(password)
+          ? '비밀번호는 영문·숫자·특수문자를 포함한 8~128자로, 공백 없이 입력해 주세요.'
+          : '',
+      passwordConfirm: !passwordConfirm
         ? '비밀번호 확인을 입력해 주세요.'
         : passwordConfirm !== password
           ? '비밀번호가 일치하지 않아요.'
@@ -102,21 +62,20 @@ export default function SignupPage() {
       await apiRequest('/api/v1/auth/signup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), username: username.trim(), password }),
+        body: JSON.stringify({ name: name.trim(), username, password }),
         signal: controller.signal,
       });
-      if (!controller.signal.aborted) setComplete(true);
+      if (!controller.signal.aborted)
+        navigate('/login', { replace: true, state: { signupComplete: true } });
     } catch (cause) {
       if (!controller.signal.aborted) {
-        setError(
+        const message =
           cause instanceof ApiError
             ? cause.message
-            : '가입 요청을 보내지 못했어요. 다시 시도해 주세요.',
-        );
-        if (cause instanceof ApiError && cause.status === 409) {
-          setCheckStatus('taken');
-          setCheckMessage('이미 사용 중인 아이디예요. 다른 아이디로 확인해 주세요.');
-        }
+            : '가입 요청을 보내지 못했어요. 다시 시도해 주세요.';
+        if (cause instanceof ApiError && cause.code === 'USERNAME_TAKEN')
+          setErrors((current) => ({ ...current, username: message }));
+        else setError(message);
       }
     } finally {
       if (!controller.signal.aborted) {
@@ -125,21 +84,6 @@ export default function SignupPage() {
       }
     }
   }
-
-  if (complete) {
-    return (
-      <section aria-labelledby="signup-complete-title" className="space-y-5">
-        <h1 id="signup-complete-title" className="text-2xl font-bold">
-          회원가입 완료
-        </h1>
-        <Link to="/login" className="btn w-full btn-primary">
-          로그인 화면으로 이동
-        </Link>
-      </section>
-    );
-  }
-
-  const checkFailed = checkStatus === 'taken' || checkStatus === 'error';
 
   return (
     <section aria-labelledby="signup-title">
@@ -156,7 +100,7 @@ export default function SignupPage() {
             name="name"
             autoComplete="name"
             required
-            className="input w-full"
+            className={`input w-full ${errors.name ? 'input-error' : ''}`}
             value={name}
             placeholder="이름을 입력해 주세요"
             disabled={pending}
@@ -178,51 +122,25 @@ export default function SignupPage() {
           <label htmlFor="signup-username" className="fieldset-label text-base-content">
             아이디
           </label>
-          <div className="flex min-w-0 gap-2">
-            <input
-              id="signup-username"
-              name="username"
-              autoComplete="username"
-              required
-              className="input w-full min-w-0 flex-1"
-              value={username}
-              placeholder="아이디를 입력해 주세요"
-              disabled={pending}
-              aria-invalid={Boolean(errors.username) || checkFailed}
-              aria-describedby="signup-username-error signup-username-status"
-              onChange={(event) => changeUsername(event.target.value)}
-            />
-            <button
-              type="button"
-              className="btn shrink-0 btn-outline"
-              disabled={pending || checkStatus === 'checking'}
-              onClick={() => void checkUsername()}
-            >
-              {checkStatus === 'checking' && (
-                <span aria-hidden="true" className="loading loading-xs loading-spinner" />
-              )}
-              {checkStatus === 'checking' ? '확인 중…' : '중복 확인'}
-            </button>
-          </div>
+          <input
+            id="signup-username"
+            name="username"
+            autoComplete="username"
+            required
+            className={`input w-full ${errors.username ? 'input-error' : ''}`}
+            value={username}
+            placeholder="아이디를 입력해 주세요"
+            disabled={pending}
+            aria-invalid={Boolean(errors.username)}
+            aria-describedby="signup-username-help"
+            onChange={(event) => changeUsername(event.target.value)}
+          />
           <p
-            id="signup-username-error"
+            id="signup-username-help"
             role={errors.username ? 'alert' : undefined}
-            className="text-error"
+            className={errors.username ? 'text-error' : 'text-base-content/70'}
           >
-            {errors.username}
-          </p>
-          <p
-            id="signup-username-status"
-            role={checkFailed ? 'alert' : 'status'}
-            className={
-              checkFailed
-                ? 'text-error'
-                : checkStatus === 'available'
-                  ? 'text-success'
-                  : 'text-base-content/70'
-            }
-          >
-            {checkMessage}
+            {errors.username || '영문·숫자·밑줄(_)만 사용, 4~20자(공백 불가)'}
           </p>
         </div>
         <div className="fieldset p-0">
@@ -235,23 +153,25 @@ export default function SignupPage() {
             type="password"
             autoComplete="new-password"
             required
-            className="input w-full"
+            className={`input w-full ${errors.password ? 'input-error' : ''}`}
             value={password}
             placeholder="비밀번호를 입력해 주세요"
             disabled={pending}
             aria-invalid={Boolean(errors.password)}
-            aria-describedby={errors.password ? 'signup-password-error' : undefined}
+            aria-describedby="signup-password-help"
             onChange={(event) => {
               setPassword(event.target.value);
               setErrors((current) => ({ ...current, password: '', passwordConfirm: '' }));
               setError('');
             }}
           />
-          {errors.password && (
-            <p id="signup-password-error" role="alert" className="text-error">
-              {errors.password}
-            </p>
-          )}
+          <p
+            id="signup-password-help"
+            role={errors.password ? 'alert' : undefined}
+            className={errors.password ? 'text-error' : 'text-base-content/70'}
+          >
+            {errors.password || '영문·숫자·특수문자 포함 8자 이상(공백 불가)'}
+          </p>
         </div>
         <div className="fieldset p-0">
           <label htmlFor="signup-password-confirm" className="fieldset-label text-base-content">
@@ -263,7 +183,7 @@ export default function SignupPage() {
             type="password"
             autoComplete="new-password"
             required
-            className="input w-full"
+            className={`input w-full ${errors.passwordConfirm ? 'input-error' : ''}`}
             value={passwordConfirm}
             placeholder="비밀번호를 다시 입력해 주세요"
             disabled={pending}
@@ -286,11 +206,7 @@ export default function SignupPage() {
             {error}
           </div>
         )}
-        <button
-          type="submit"
-          className="btn w-full btn-primary"
-          disabled={pending || checkStatus === 'checking'}
-        >
+        <button type="submit" className="btn w-full btn-primary" disabled={pending}>
           {pending && <span aria-hidden="true" className="loading loading-sm loading-spinner" />}
           {pending ? '가입 중…' : '회원가입'}
         </button>

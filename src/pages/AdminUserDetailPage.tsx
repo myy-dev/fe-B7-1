@@ -9,6 +9,7 @@ import {
   type AdminUserDetail,
 } from '../lib/admin';
 import useAdminResource from '../lib/useAdminResource';
+import AdminRoleControl from '../components/AdminRoleControl';
 
 export default function AdminUserDetailPage() {
   const { userId } = useParams();
@@ -18,7 +19,7 @@ export default function AdminUserDetailPage() {
   const query = adminQuery(search, []);
   if (id) query.set('user_id', String(id));
   const sessions = useAdminResource<AdminPage<AdminSession>>(
-    user.data ? `/api/v1/admin/sessions?${query}` : null,
+    id ? `/api/v1/admin/sessions?${query}` : null,
   );
   return (
     <>
@@ -49,7 +50,7 @@ export default function AdminUserDetailPage() {
               </div>
               <dl className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <div>
-                  <dt className="text-sm text-base-content/60">회원 ID</dt>
+                  <dt className="text-sm text-base-content/60">회원 번호(PK)</dt>
                   <dd className="mt-1">{user.data.id}</dd>
                 </div>
                 <div>
@@ -65,6 +66,7 @@ export default function AdminUserDetailPage() {
                   <dd className="mt-1">{formatAdminTime(user.data.last_login_at)}</dd>
                 </div>
               </dl>
+              <AdminRoleControl key={`${user.data.id}:${user.data.role}`} member={user.data} />
             </div>
           </section>
           <h2 className="text-lg font-bold">대화 세션</h2>
@@ -85,7 +87,7 @@ export default function AdminUserDetailPage() {
                     {sessions.data.items.map((session) => (
                       <tr key={session.chat_id}>
                         <td>
-                          <p className="max-w-sm wrap-anywhere">{session.title}</p>
+                          <p className="max-w-sm wrap-anywhere">{session.title || '새 대화'}</p>
                           <p className="mt-1 max-w-sm font-mono text-xs wrap-anywhere text-base-content/60">
                             {session.chat_id}
                           </p>
@@ -96,7 +98,7 @@ export default function AdminUserDetailPage() {
                           <Link
                             className="btn btn-ghost btn-sm"
                             to={`/admin/sessions/${session.chat_id}`}
-                            aria-label={`${session.title} 대화 보기`}
+                            aria-label={`${session.title || '새 대화'} 대화 보기`}
                           >
                             보기
                           </Link>

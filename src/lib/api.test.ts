@@ -1,9 +1,116 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
+import { getAuthSession, signIn, signOut } from './auth';
+import { createMockLoginResponse } from '../mocks/handlers';
 import { server } from '../mocks/server';
 import { API_BASE_URL, apiRequest } from './api';
 
 describe('API 요청과 MSW 연동', () => {
+  it.each([
+    ['GET', '/api/v1/chats'],
+    ['POST', '/api/v1/auth/logout'],
+    ['GET', '/api/v1/auth/me'],
+    ['POST', '/api/v1/chats'],
+    ['GET', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75'],
+    ['POST', '/api/v1/chats/7b9e0398-6b3e-4b88-87db-358748803b75/messages'],
+  ])('%s %s 요청에 토큰과 기존 헤더를 전달한다', async (method, path) => {
+    const response = createMockLoginResponse();
+    signIn(response);
+    let called = false;
+    server.use(
+      http.all(`${API_BASE_URL}${path}`, ({ request }) => {
+        called = true;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${response.access_token}`);
+        expect(request.headers.get('Content-Type')).toBe('application/json');
+        return HttpResponse.json({ ok: true });
+      }),
+    );
+    await expect(
+      apiRequest(path, { method, headers: { 'Content-Type': 'application/json' } }),
+    ).resolves.toEqual({ ok: true });
+    expect(called).toBe(true);
+  });
+
+  it.each(['/api/v1/chats', '/api/v1/auth/logout', '/api/v1/auth/me', '/api/v1/admin/users'])(
+    '토큰 없이 %s 요청을 보내지 않는다',
+    async (path) => {
+      let calls = 0;
+      server.use(
+        http.all(`${API_BASE_URL}${path}`, () => {
+          calls++;
+          return HttpResponse.json({ items: [] });
+        }),
+      );
+      await expect(apiRequest(path)).rejects.toMatchObject({
+        status: 401,
+        code: 'UNAUTHORIZED',
+      });
+      expect(calls).toBe(0);
+    },
+  );
+
+  it('로그아웃 MSW가 204를 반환하고 폐기된 토큰의 재사용을 거절한다', async () => {
+    signIn(createMockLoginResponse());
+    await expect(apiRequest('/api/v1/auth/logout', { method: 'POST' })).resolves.toBeUndefined();
+    await expect(apiRequest('/api/v1/chats')).rejects.toMatchObject({ status: 401 });
+    expect(getAuthSession()).toBeNull();
+  });
+
+  it('로그인 실패의 401로 기존 인증 상태를 삭제하지 않는다', async () => {
+    const response = createMockLoginResponse();
+    signIn(response);
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/login`, ({ request }) => {
+        expect(request.headers.has('Authorization')).toBe(false);
+        return HttpResponse.json(
+          {
+            error: {
+              code: 'INVALID_CREDENTIALS',
+              message: '아이디 또는 비밀번호가 올바르지 않습니다.',
+            },
+          },
+          { status: 401 },
+        );
+      }),
+    );
+    await expect(apiRequest('/api/v1/auth/login', { method: 'POST' })).rejects.toMatchObject({
+      status: 401,
+      code: 'INVALID_CREDENTIALS',
+    });
+    expect(getAuthSession()?.accessToken).toBe(response.access_token);
+  });
+
+  it('이전 인증 요청의 늦은 401이 새 로그인 상태를 삭제하지 않는다', async () => {
+    signIn(createMockLoginResponse());
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/chats`, async () => {
+        entered();
+        await gate;
+        return HttpResponse.json(
+          { error: { code: 'UNAUTHORIZED', message: '로그인이 필요합니다.' } },
+          { status: 401 },
+        );
+      }),
+    );
+    const pending = apiRequest('/api/v1/chats');
+    const rejection = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    await started;
+    signOut();
+    const next = createMockLoginResponse();
+    signIn(next);
+    release();
+    await rejection;
+    expect(getAuthSession()?.accessToken).toBe(next.access_token);
+  });
+
   it('JSON 응답을 반환한다', async () => {
     const result = await apiRequest<{ message: string }>('/api/example');
     expect(result.message).toBe('MSW가 API 응답을 제공합니다.');
@@ -52,6 +159,31 @@ describe('API 요청과 MSW 연동', () => {
     await expect(apiRequest('/api/example')).rejects.toMatchObject({
       status: 500,
       message: '대화 목록을 불러오지 못했어요.',
+      code: 'DB_ERROR',
+      requestId: 'request-id',
+    });
+  });
+
+  it('회원가입 중복 오류의 식별 코드와 요청 ID를 유지한다', async () => {
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/auth/signup`, () =>
+        HttpResponse.json(
+          {
+            error: {
+              code: 'USERNAME_TAKEN',
+              message: '이미 사용 중인 아이디입니다.',
+              request_id: 'duplicate-request',
+            },
+          },
+          { status: 409 },
+        ),
+      ),
+    );
+    await expect(apiRequest('/api/v1/auth/signup', { method: 'POST' })).rejects.toMatchObject({
+      status: 409,
+      code: 'USERNAME_TAKEN',
+      message: '이미 사용 중인 아이디입니다.',
+      requestId: 'duplicate-request',
     });
   });
 
@@ -60,5 +192,40 @@ describe('API 요청과 MSW 연동', () => {
       http.delete(`${API_BASE_URL}/api/example`, () => new HttpResponse(null, { status: 204 })),
     );
     await expect(apiRequest<void>('/api/example', { method: 'DELETE' })).resolves.toBeUndefined();
+  });
+
+  it('회원가입 mock이 서버와 같은 응답과 대소문자 중복 검사를 제공한다', async () => {
+    const options = { method: 'POST', headers: { 'Content-Type': 'application/json' } };
+    const user = await apiRequest('/api/v1/auth/signup', {
+      ...options,
+      body: JSON.stringify({ name: ' 오리 친구 ', username: 'New_User', password: 'Password123!' }),
+    });
+    expect(user).toEqual({
+      id: expect.any(Number),
+      username: 'new_user',
+      name: '오리 친구',
+      created_at: expect.any(String),
+    });
+    await expect(
+      apiRequest('/api/v1/auth/signup', {
+        ...options,
+        body: JSON.stringify({ name: '친구', username: 'NEW_USER', password: 'Password123!' }),
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'USERNAME_TAKEN' });
+  });
+
+  it('회원가입 mock이 권한 등 추가 필드를 거절한다', async () => {
+    await expect(
+      apiRequest('/api/v1/auth/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: '친구',
+          username: 'new_user',
+          password: 'Password123!',
+          role: 'admin',
+        }),
+      }),
+    ).rejects.toMatchObject({ status: 422, code: 'INVALID_INPUT' });
   });
 });

@@ -1,5 +1,7 @@
 import { delay, http, HttpResponse } from 'msw';
 import { API_BASE_URL } from '../lib/api';
+import type { CurrentUser, LoginResponse } from '../lib/auth';
+import { isValidSignupPassword } from '../lib/auth';
 import { sortSessions, type ChatDetail, type ChatMessage } from '../lib/chats';
 import {
   dateRangeError,
@@ -81,13 +83,15 @@ const exampleChats: ChatDetail[] = [
   },
 ];
 
-const adminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => ({
+const exampleAdminUsers: AdminUserDetail[] = Array.from({ length: 24 }, (_, index) => ({
   id: index + 1,
   username: index === 0 ? 'user_a' : index === 1 ? 'user_b' : `user_${index + 1}`,
   name: index === 0 ? '사용자A' : index === 1 ? '사용자B' : `사용자 ${index + 1}`,
+  role: index === 0 || index === 3 ? 'admin' : 'user',
   created_at: new Date(Date.UTC(2026, 8, 30 - index, 3)).toISOString(),
   last_login_at: index % 2 === 0 ? '2026-10-05T03:00:00Z' : null,
 }));
+let adminUsers = structuredClone(exampleAdminUsers);
 
 const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
   const event = ['request_received', 'ai_call_succeeded', 'ai_call_failed', 'user_login_failed'][
@@ -106,11 +110,13 @@ const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
 // 동일한 시각·내용의 로그도 각각 한 건으로 표시한다.
 adminSystemLogs.splice(1, 0, { ...adminSystemLogs[0] });
 
-function getAdminSessions(store: Map<string, ChatDetail>) {
+type MockChat = ChatDetail & { user_id: number; deleted_at: string | null };
+
+function getAdminSessions(store: Map<string, MockChat>) {
   return sortSessions([...store.values()]).map((chat) => ({
     chat_id: chat.chat_id,
-    user_id: chat.chat_id === exampleChats[1].chat_id ? 2 : 1,
-    title: chat.messages[0]?.question.slice(0, 40) || '새 대화',
+    user_id: chat.user_id,
+    title: chat.messages[0]?.question ?? '',
     created_at: chat.created_at,
     message_count: chat.messages.length,
   }));
@@ -142,37 +148,81 @@ function withinPeriod(time: string, start: string | null, end: string | null) {
 }
 
 function adminPage<T>(items: T[], page: number, size: number) {
-  const rows = import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'empty' ? [] : items;
   return HttpResponse.json({
-    items: rows.slice((page - 1) * size, page * size),
-    total: rows.length,
+    items: items.slice((page - 1) * size, page * size),
+    total: items.length,
     page,
     size,
   });
 }
 
-async function adminFailure(section: string) {
-  const scenario = import.meta.env.VITE_ADMIN_MOCK_SCENARIO;
-  await delay(scenario === 'slow' ? 1500 : 300);
-  return scenario === 'error' || scenario === `${section}-error`
-    ? chatError('DB_ERROR', '조회하지 못했어요. 다시 시도해 주세요.', 500)
-    : null;
+let chatStore = makeChatStore();
+let signupUsernames = new Set(['duck', 'taken']);
+const revokedTokens = new Set<string>();
+export function createMockLoginResponse(
+  expiresIn = 1800,
+  role: CurrentUser['role'] = 'user',
+  userId = role === 'admin' ? 1 : 2,
+): LoginResponse {
+  // 미리보기 새로고침 후에도 유효한 토큰을 확인할 수 있도록 만료 시각을 포함한다.
+  const token = `mock-token.${crypto.randomUUID()}.${Date.now() + expiresIn * 1000}.${role}.${userId}`;
+  return { access_token: token, token_type: 'bearer', expires_in: expiresIn };
 }
 
-let chatStore = makeChatStore();
-let sendFailures = new Set<string>();
-let deleteFailures = new Set<string>();
+function authenticationError(request: Request) {
+  const token = request.headers.get('Authorization')?.replace(/^Bearer /, '') ?? '';
+  const match =
+    /^mock-token\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.(\d+)\.(user|admin)(?:\.(\d+))?$/.exec(
+      token,
+    );
+  if (
+    !match ||
+    Number(match[1]) <= Date.now() ||
+    revokedTokens.has(token) ||
+    !adminUsers.some((member) => member.id === Number(match[3] ?? (match[2] === 'admin' ? 1 : 2)))
+  )
+    return chatError('UNAUTHORIZED', '로그인이 필요합니다.', 401);
+  return null;
+}
+
+function adminAuthenticationError(request: Request) {
+  const unauthorized = authenticationError(request);
+  if (unauthorized) return unauthorized;
+  return mockCurrentUser(request).role === 'admin'
+    ? null
+    : chatError('FORBIDDEN', '관리자 권한이 필요합니다.', 403);
+}
+
+function mockCurrentUser(request: Request): CurrentUser {
+  const token = request.headers.get('Authorization')!;
+  const match = /\.(user|admin)(?:\.(\d+))?$/.exec(token)!;
+  const id = Number(match[2] ?? (match[1] === 'admin' ? 1 : 2));
+  const member = adminUsers.find((item) => item.id === id)!;
+  return {
+    id,
+    username: id === 1 ? 'admin' : id === 2 ? 'friend' : member.username,
+    name: id === 1 ? '관리자' : id === 2 ? '오리 친구' : member.name,
+    role: member.role,
+    created_at: member.created_at,
+    last_login_at: '2026-10-09T03:00:00Z',
+  };
+}
+
+export function resetAuthMocks() {
+  signupUsernames = new Set(['duck', 'taken']);
+  revokedTokens.clear();
+  adminUsers = structuredClone(exampleAdminUsers);
+}
 
 function makeChatStore() {
-  const items =
-    import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'empty' ? [] : structuredClone(exampleChats);
-  return new Map(items.map((chat) => [chat.chat_id, chat]));
+  const items = structuredClone(exampleChats);
+  return new Map<string, MockChat>(
+    items.map((chat) => [chat.chat_id, { ...chat, user_id: 2, deleted_at: null }]),
+  );
 }
 
 export function resetChatMocks() {
   chatStore = makeChatStore();
-  sendFailures = new Set();
-  deleteFailures = new Set();
 }
 
 function chatError(
@@ -186,19 +236,27 @@ function chatError(
 
 export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/admin/users`, async ({ request }) => {
-    const failure = await adminFailure('users');
-    if (failure) return failure;
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     return adminPage(
-      adminUsers.map(({ id, username, name, created_at }) => ({ id, username, name, created_at })),
+      adminUsers.map(({ id, username, name, role, created_at }) => ({
+        id,
+        username,
+        name,
+        role,
+        created_at,
+      })),
       query.page,
       query.size,
     );
   }),
-  http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ params }) => {
-    const failure = await adminFailure('user');
-    if (failure) return failure;
+  http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
+    await delay(300);
     const id = positiveInteger(String(params.userId));
     if (!id) return chatError('INVALID_INPUT', '회원 주소를 확인해 주세요.', 422);
     const user = adminUsers.find((item) => item.id === id);
@@ -206,10 +264,33 @@ export const handlers = [
       ? HttpResponse.json(user)
       : chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
   }),
+  http.patch(`${API_BASE_URL}/api/v1/admin/users/:userId/role`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
+    const id = positiveInteger(String(params.userId));
+    const body: unknown = await request.json().catch(() => null);
+    if (
+      !id ||
+      !body ||
+      typeof body !== 'object' ||
+      !('role' in body) ||
+      (body.role !== 'admin' && body.role !== 'user')
+    )
+      return chatError('INVALID_ROLE', '역할은 admin 또는 user만 지정할 수 있습니다.', 422);
+    if (id === mockCurrentUser(request).id && body.role !== 'admin')
+      return chatError('CANNOT_DEMOTE_SELF', '자기 자신의 관리자 권한은 해제할 수 없습니다.', 403);
+    await delay(300);
+    if (request.signal.aborted) return HttpResponse.error();
+    const member = adminUsers.find((item) => item.id === id);
+    if (!member) return chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
+    member.role = body.role;
+    return HttpResponse.json({ id: member.id, username: member.username, role: member.role });
+  }),
   http.get(`${API_BASE_URL}/api/v1/admin/sessions`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('sessions');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request, true);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     return adminPage(
@@ -218,10 +299,11 @@ export const handlers = [
       query.size,
     );
   }),
-  http.get(`${API_BASE_URL}/api/v1/admin/sessions/:chatId`, async ({ params }) => {
+  http.get(`${API_BASE_URL}/api/v1/admin/sessions/:chatId`, async ({ request, params }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('session');
-    if (failure) return failure;
+    await delay(300);
     const id = String(params.chatId);
     const session = getAdminSessions(store).find((item) => item.chat_id === id);
     const chat = store.get(id);
@@ -230,9 +312,10 @@ export const handlers = [
       : chatError('SESSION_NOT_FOUND', '세션을 찾을 수 없어요.', 404);
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/logs`, async ({ request }) => {
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('logs');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     const sessions = getAdminSessions(store).filter(
@@ -249,8 +332,9 @@ export const handlers = [
     return adminPage(messages, query.page, query.size);
   }),
   http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, async ({ request }) => {
-    const failure = await adminFailure('system');
-    if (failure) return failure;
+    const unauthorized = adminAuthenticationError(request);
+    if (unauthorized) return unauthorized;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     const rows = adminSystemLogs
@@ -267,72 +351,81 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/example`, () =>
     HttpResponse.json({ message: 'MSW가 API 응답을 제공합니다.' }),
   ),
-  http.get(`${API_BASE_URL}/api/v1/chats`, async () => {
+  http.get(`${API_BASE_URL}/api/v1/chats`, async ({ request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'list-error')
-      return chatError('DB_ERROR', '대화 목록을 불러오지 못했어요.', 500);
-    const items = sortSessions([...store.values()]).map(({ chat_id, created_at }) => ({
+    await delay(350);
+    const items = sortSessions(
+      [...store.values()].filter(
+        (chat) => !chat.deleted_at && chat.user_id === mockCurrentUser(request).id,
+      ),
+    ).map(({ chat_id, created_at }) => ({
       chat_id,
       created_at,
     }));
     return HttpResponse.json({ items });
   }),
-  http.post(`${API_BASE_URL}/api/v1/chats`, async () => {
+  http.post(`${API_BASE_URL}/api/v1/chats`, async ({ request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 600);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'create-error')
-      return chatError('DB_ERROR', '대화를 만들지 못했어요. 다시 시도해 주세요.', 500);
+    await delay(600);
     const session = { chat_id: crypto.randomUUID(), created_at: new Date().toISOString() };
-    store.set(session.chat_id, { ...session, messages: [] });
+    store.set(session.chat_id, {
+      ...session,
+      user_id: mockCurrentUser(request).id,
+      deleted_at: null,
+      messages: [],
+    });
     return HttpResponse.json(session, { status: 201 });
   }),
-  http.get(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params }) => {
+  http.get(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
+    await delay(350);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(String(params.chatId)))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'detail-error')
-      return chatError('DB_ERROR', '대화를 불러오지 못했어요.', 500);
     const chat = store.get(String(params.chatId));
-    return chat
-      ? HttpResponse.json(chat)
+    return chat && !chat.deleted_at && chat.user_id === mockCurrentUser(request).id
+      ? HttpResponse.json({
+          chat_id: chat.chat_id,
+          created_at: chat.created_at,
+          messages: chat.messages,
+        })
       : chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
   }),
-  // 삭제 API 명세 확정 전의 임시 계약: DELETE /chats/:chatId, 성공 204.
-  http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params }) => {
+  http.delete(`${API_BASE_URL}/api/v1/chats/:chatId`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
-    const failures = deleteFailures;
     const id = String(params.chatId);
-    const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
-    await delay(scenario === 'slow' ? 1500 : 600);
+    await delay(600);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
-    if (!store.has(id)) return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
-    if (scenario === 'delete-error' && !failures.has(id)) {
-      failures.add(id);
-      return chatError('DB_ERROR', '대화를 삭제하지 못했어요. 다시 시도해 주세요.', 500);
-    }
-    store.delete(id);
+    const chat = store.get(id);
+    if (!chat || chat.deleted_at || chat.user_id !== mockCurrentUser(request).id)
+      return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+    chat.deleted_at = new Date().toISOString();
     return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/chats/:chatId/messages`, async ({ params, request }) => {
+    const error = authenticationError(request);
+    if (error) return error;
     const store = chatStore;
-    const failures = sendFailures;
-    const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
     const chatId = String(params.chatId);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(chatId))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
     const chat = store.get(chatId);
-    if (!chat) return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
+    if (!chat || chat.deleted_at || chat.user_id !== mockCurrentUser(request).id)
+      return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
     const body: unknown = await request.json().catch(() => null);
     const question =
       body && typeof body === 'object' && 'question' in body && typeof body.question === 'string'
         ? body.question.trim()
         : '';
     if (!question) return chatError('INVALID_INPUT', '메시지를 입력해 주세요.', 422);
-    if (chat.messages.some((message) => message.status === 'pending'))
-      return chatError('CHAT_BUSY', '이전 답변을 기다린 뒤 다시 보내 주세요.', 409);
 
     const message: ChatMessage = {
       request_id: crypto.randomUUID(),
@@ -345,23 +438,9 @@ export const handlers = [
       finished_at: null,
     };
     chat.messages.push(message);
-    const fail = ['send-error', 'timeout'].includes(scenario ?? '') && !failures.has(chatId);
-    if (fail) failures.add(chatId);
     // 중단된 브라우저 요청도 서버 처리와 마찬가지로 기록의 완료까지 진행한다.
-    await delay(scenario === 'slow' ? 3500 : 800);
+    await delay(800);
     message.finished_at = new Date().toISOString();
-    if (fail) {
-      message.status = 'failed';
-      message.error_code = scenario === 'timeout' ? 'AI_TIMEOUT' : 'AI_UNAVAILABLE';
-      return chatError(
-        message.error_code,
-        scenario === 'timeout'
-          ? '응답 시간이 초과되었어요. 다시 보내 주세요.'
-          : '답변을 받지 못했어요. 다시 보내 주세요.',
-        scenario === 'timeout' ? 504 : 502,
-        message.request_id,
-      );
-    }
     message.status = 'completed';
     message.answer =
       question.includes('\n') || question.length > 200
@@ -370,62 +449,70 @@ export const handlers = [
         : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
     return HttpResponse.json(message, { status: 201 });
   }),
-  // 회원 API 상세 명세가 확정되기 전의 임시 계약. 실제 계정·토큰은 생성하지 않는다.
-  http.get(`${API_BASE_URL}/api/v1/users/check-username`, async ({ request }) => {
-    const username = new URL(request.url).searchParams.get('username')?.trim();
-    await delay(600);
-    if (!username)
-      return HttpResponse.json({ message: '아이디를 입력해 주세요.' }, { status: 422 });
-    if (username === 'error') {
-      return HttpResponse.json(
-        { message: '확인하지 못했어요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ available: !['duck', 'taken'].includes(username) });
+  http.get(`${API_BASE_URL}/api/v1/auth/me`, async ({ request }) => {
+    const unauthorized = authenticationError(request);
+    if (unauthorized) return unauthorized;
+    return HttpResponse.json(mockCurrentUser(request));
+  }),
+  http.post(`${API_BASE_URL}/api/v1/auth/logout`, async ({ request }) => {
+    await delay(300);
+    const unauthorized = authenticationError(request);
+    if (unauthorized) return unauthorized;
+    revokedTokens.add(request.headers.get('Authorization')!.slice(7));
+    return new HttpResponse(null, { status: 204 });
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/login`, async ({ request }) => {
-    const { username, password } = (await request.json()) as {
-      username?: string;
-      password?: string;
-    };
+    const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+    const username = body?.username;
+    const password = body?.password;
     await delay(600);
-    if (!username?.trim() || !password?.trim()) {
-      return HttpResponse.json({ message: '아이디와 비밀번호를 입력해 주세요.' }, { status: 422 });
-    }
-    if (username === 'wrong') {
-      return HttpResponse.json(
-        { message: '아이디 또는 비밀번호를 확인해 주세요.' },
-        { status: 401 },
-      );
-    }
-    if (username === 'error') {
-      return HttpResponse.json(
-        { message: '잠시 연결이 어려워요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ message: '로그인 미리보기 완료' });
+    if (
+      typeof username !== 'string' ||
+      !/^[a-zA-Z0-9_]{4,20}$/.test(username) ||
+      typeof password !== 'string' ||
+      [...password].length < 8 ||
+      [...password].length > 128 ||
+      !body ||
+      Object.keys(body).some((key) => !['username', 'password'].includes(key))
+    )
+      return chatError('INVALID_INPUT', '입력값을 확인해 주세요.', 422);
+    if (username.toLowerCase() === 'wrong')
+      return chatError('INVALID_CREDENTIALS', '아이디 또는 비밀번호가 올바르지 않습니다.', 401);
+    if (username.toLowerCase() === 'error')
+      return chatError('AUTH_CONFIGURATION_ERROR', '인증 서비스 설정을 확인해야 합니다.', 503);
+    return HttpResponse.json(
+      createMockLoginResponse(1800, username.toLowerCase() === 'admin' ? 'admin' : 'user'),
+    );
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/signup`, async ({ request }) => {
-    const { name, username, password } = (await request.json()) as {
-      name?: string;
-      username?: string;
-      password?: string;
-    };
+    const body = (await request.json()) as Record<string, unknown> | null;
+    const name = typeof body?.name === 'string' ? body.name.trim() : '';
+    const username = typeof body?.username === 'string' ? body.username : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
     await delay(600);
-    if (!name?.trim() || !username?.trim() || !password?.trim()) {
-      return HttpResponse.json({ message: '필수 정보를 입력해 주세요.' }, { status: 422 });
-    }
-    if (['duck', 'taken'].includes(username)) {
-      return HttpResponse.json({ message: '이미 사용 중인 아이디예요.' }, { status: 409 });
-    }
-    if (username === 'signup-error') {
-      return HttpResponse.json(
-        { message: '가입 요청을 처리하지 못했어요. 다시 시도해 주세요.' },
-        { status: 503 },
-      );
-    }
-    return HttpResponse.json({ message: '가입 미리보기 완료' }, { status: 201 });
+    if (
+      !name ||
+      [...name].length > 50 ||
+      username.length < 4 ||
+      username.length > 20 ||
+      /[^a-zA-Z0-9_]/.test(username) ||
+      !isValidSignupPassword(password) ||
+      !body ||
+      Object.keys(body).some((key) => !['name', 'username', 'password'].includes(key))
+    )
+      return chatError('INVALID_INPUT', '입력값을 확인해 주세요.', 422);
+
+    const normalizedUsername = username.toLowerCase();
+    if (signupUsernames.has(normalizedUsername))
+      return chatError('USERNAME_TAKEN', '이미 사용 중인 아이디입니다.', 409);
+    if (normalizedUsername === 'signup_error')
+      return chatError('INTERNAL_ERROR', '가입 요청을 처리하지 못했어요. 다시 시도해 주세요.', 500);
+
+    const id = signupUsernames.size + 1;
+    signupUsernames.add(normalizedUsername);
+    return HttpResponse.json(
+      { id, username: normalizedUsername, name, created_at: new Date().toISOString() },
+      { status: 201 },
+    );
   }),
 ];

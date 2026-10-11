@@ -10,7 +10,7 @@ export default defineConfig({
     clearMocks: true,
     env: {
       VITE_API_BASE_URL: 'http://localhost:8000',
-      VITE_ENABLE_MSW: 'false',
+      VITE_ENABLE_MSW: 'true',
     },
   },
 });

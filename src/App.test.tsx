@@ -3,26 +3,31 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import App from './App';
+import { signIn } from './lib/auth';
+import { createMockLoginResponse } from './mocks/handlers';
 
 describe('기본 라우팅', () => {
-  it('시작 주소에서 채팅 시작 화면으로 이동한다', () => {
+  it('비로그인 상태의 시작 주소는 로그인 화면으로 이동한다', () => {
     render(
       <MemoryRouter>
         <App />
         <CurrentPath />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
-    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/chats');
+    expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/login');
   });
 
-  it('채팅 시작 주소로 직접 접근할 수 있다', () => {
+  it('로그인 후 채팅 시작 주소로 직접 접근할 수 있다', async () => {
+    signIn(createMockLoginResponse());
     render(
       <MemoryRouter initialEntries={['/chats']}>
         <App />
       </MemoryRouter>,
     );
-    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' }),
+    ).toBeInTheDocument();
   });
 
   it.each(['/unknown', '/chats/unknown/messages'])(
@@ -36,9 +41,7 @@ describe('기본 라우팅', () => {
       );
       expect(screen.getByRole('heading', { name: '앗, 길을 잃었나 봐요!' })).toBeInTheDocument();
       await user.click(screen.getByRole('link', { name: '처음 화면으로 돌아가기' }));
-      expect(
-        screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' }),
-      ).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
     },
   );
 
@@ -50,8 +53,25 @@ describe('기본 라우팅', () => {
       </MemoryRouter>,
     );
     await user.click(screen.getByRole('link', { name: '꽥꽥이 처음 화면' }));
-    expect(screen.getByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '로그인' })).toBeInTheDocument();
   });
+
+  it.each(['/', '/login', '/signup'])(
+    '로그인 상태의 %s 접근은 채팅 화면으로 이동한다',
+    async (path) => {
+      signIn(createMockLoginResponse());
+      render(
+        <MemoryRouter initialEntries={[path]}>
+          <App />
+          <CurrentPath />
+        </MemoryRouter>,
+      );
+      expect(
+        await screen.findByRole('heading', { name: '반가워요, 저는 꽥꽥이예요.' }),
+      ).toBeInTheDocument();
+      expect(screen.getByLabelText('현재 경로')).toHaveTextContent('/chats');
+    },
+  );
 });
 
 function CurrentPath() {

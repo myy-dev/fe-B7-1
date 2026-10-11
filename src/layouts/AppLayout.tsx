@@ -1,7 +1,10 @@
 import { Link, Outlet, useMatch } from 'react-router';
 import DuckAvatar from '../components/DuckAvatar';
+import LogoutButton from '../components/LogoutButton';
+import { useAuth } from '../lib/auth';
 
 export default function AppLayout() {
+  const { session, user } = useAuth();
   const isChatPage = Boolean(useMatch('/chats/*'));
   const isHomePage = Boolean(useMatch('/chats'));
 
@@ -29,12 +32,18 @@ export default function AppLayout() {
             <span className="text-xl font-extrabold tracking-tight">꽥꽥이</span>
           </Link>
           <div className="flex items-center gap-2">
-            <Link to="/admin/users" className="btn btn-ghost btn-sm">
-              관리자
-            </Link>
-            <Link to="/login" className="btn btn-ghost btn-sm">
-              로그인
-            </Link>
+            {user?.role === 'admin' && (
+              <Link to="/admin/users" className="btn btn-ghost btn-sm">
+                관리자
+              </Link>
+            )}
+            {session ? (
+              <LogoutButton />
+            ) : (
+              <Link to="/login" className="btn btn-ghost btn-sm">
+                로그인
+              </Link>
+            )}
           </div>
         </nav>
       </header>
