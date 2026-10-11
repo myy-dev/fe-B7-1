@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { http, HttpResponse } from 'msw';
 import { MemoryRouter, useLocation, useNavigate } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type {
@@ -47,8 +47,6 @@ function renderPage(path = '/admin/users') {
   );
   return userEvent.setup();
 }
-
-afterEach(() => vi.unstubAllEnvs());
 
 describe('관리자 회원·세션 조회', () => {
   it('관리자 시작 주소에서 회원 목록으로 이동하고 서비스로 돌아간다', async () => {
@@ -351,8 +349,12 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     await screen.findByText('조건에 맞는 시스템 로그가 없어요.');
   });
 
-  it('빈 목록 시나리오를 회원 목록에 적용한다', async () => {
-    vi.stubEnv('VITE_ADMIN_MOCK_SCENARIO', 'empty');
+  it('빈 회원 목록과 비활성 다음 버튼을 표시한다', async () => {
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/users`, () =>
+        HttpResponse.json({ items: [], total: 0, page: 1, size: 20 }),
+      ),
+    );
     renderPage();
     await screen.findByText('회원이 없어요.');
     expect(screen.getByRole('button', { name: '다음' })).toBeDisabled();

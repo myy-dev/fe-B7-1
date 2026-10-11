@@ -3,11 +3,10 @@ import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { StrictMode } from 'react';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatSession } from '../lib/chats';
-import { resetChatMocks } from '../mocks/handlers';
 import { server } from '../mocks/server';
 import { createMockLoginResponse } from '../mocks/handlers';
 import { getAccessToken, signIn } from '../lib/auth';
@@ -18,11 +17,6 @@ const firstId = 'e6100748-b7f0-48e6-a264-7c20a748cf93';
 const emptyId = '7b9e0398-6b3e-4b88-87db-358748803b75';
 const firstDelete = '10월 5일 오후 12:00 대화 삭제';
 const emptyDelete = '10월 3일 오전 10:30 대화 삭제';
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-  resetChatMocks();
-});
 
 function CurrentPath() {
   return <output aria-label="현재 경로">{useLocation().pathname}</output>;
@@ -151,8 +145,7 @@ describe('대화 삭제', () => {
   });
 
   it('홈에서도 마지막 대화 삭제 후 빈 목록과 새 대화 시작을 제공한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats`, () => HttpResponse.json({ items: [] })));
     const user = renderPage();
     await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
     await screen.findByRole('textbox', { name: '메시지' });
@@ -168,7 +161,17 @@ describe('대화 삭제', () => {
   });
 
   it('삭제 실패 시 확인창·목록·선택을 유지하고 재시도한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'delete-error');
+    server.use(
+      http.delete(
+        `${API_BASE_URL}/api/v1/chats/${firstId}`,
+        () =>
+          HttpResponse.json(
+            { error: { code: 'DB_ERROR', message: '삭제 실패', request_id: 'delete-failed' } },
+            { status: 500 },
+          ),
+        { once: true },
+      ),
+    );
     const user = renderPage(`/chats/${firstId}`);
     await screen.findByText('오늘 하루가 조금 지쳤어.');
     const dialog = await openDelete(user);
@@ -239,8 +242,6 @@ describe('대화 삭제', () => {
   });
 
   it('늦은 목록 응답이 삭제한 새 세션을 다시 표시하지 않는다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
     let release: (() => void) | undefined;
     let stale: ChatSession | undefined;
     server.use(
