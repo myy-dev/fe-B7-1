@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { delay, http, HttpResponse } from 'msw';
 import { MemoryRouter, useLocation } from 'react-router';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import App from '../App';
 import { API_BASE_URL, apiRequest } from '../lib/api';
 import type { ChatDetail, ChatMessage, ChatSession } from '../lib/chats';
@@ -30,11 +30,6 @@ function renderPage(path = '/chats') {
 function CurrentPath() {
   return <output aria-label="현재 경로">{useLocation().pathname}</output>;
 }
-
-afterEach(() => {
-  vi.unstubAllEnvs();
-  resetChatMocks();
-});
 
 describe('채팅 세션 화면', () => {
   it('홈에서 목록을 조회하고 기존 대화로 이동한다', async () => {
@@ -96,8 +91,7 @@ describe('채팅 세션 화면', () => {
   });
 
   it('빈 목록에서도 새 대화를 만들 수 있다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'empty');
-    resetChatMocks();
+    server.use(http.get(`${API_BASE_URL}/api/v1/chats`, () => HttpResponse.json({ items: [] })));
     const user = renderPage();
     await screen.findByText('아직 대화가 없어요.');
     await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
@@ -415,10 +409,41 @@ describe('질문 전송', () => {
     expect(payload).toEqual({ question: '한글 질문\n둘째 줄' });
   });
 
-  it.each(['send-error', 'timeout'])(
+  it.each([
+    ['AI_UNAVAILABLE', 502, '답변을 받지 못했어요. 다시 보내 주세요.'],
+    ['AI_TIMEOUT', 504, '응답 시간이 초과되었어요. 다시 보내 주세요.'],
+  ] as const)(
     '%s 실패 기록과 입력을 유지하고 다시 보내면 성공한다',
-    async (scenario) => {
-      vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', scenario);
+    async (code, status, errorMessage) => {
+      const detail: ChatDetail = {
+        chat_id: emptyId,
+        created_at: '2026-10-05T03:00:00Z',
+        messages: [],
+      };
+      server.use(
+        http.get(`${API_BASE_URL}/api/v1/chats/${emptyId}`, () => HttpResponse.json(detail)),
+        http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+          const { question } = (await request.json()) as { question: string };
+          const failed = detail.messages.length === 0;
+          const message: ChatMessage = {
+            request_id: crypto.randomUUID(),
+            chat_id: emptyId,
+            question,
+            answer: failed ? null : '이야기해 줘서 고마워요.',
+            status: failed ? 'failed' : 'completed',
+            error_code: failed ? code : null,
+            created_at: new Date().toISOString(),
+            finished_at: new Date().toISOString(),
+          };
+          detail.messages.push(message);
+          return failed
+            ? HttpResponse.json(
+                { error: { code, message: errorMessage, request_id: message.request_id } },
+                { status },
+              )
+            : HttpResponse.json(message, { status: 201 });
+        }),
+      );
       const user = renderPage(`/chats/${emptyId}`);
       const input = await screen.findByRole('textbox', { name: '메시지' });
       await user.type(input, '다시 이야기해 볼까?');
@@ -431,8 +456,8 @@ describe('질문 전송', () => {
       await user.click(screen.getByRole('button', { name: '보내기' }));
       await screen.findByText(/이야기해 줘서 고마워요/);
       expect(input).toHaveValue('');
-      const detail = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
-      expect(detail.messages.map((message) => message.status)).toEqual(['failed', 'completed']);
+      const saved = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
+      expect(saved.messages.map((message) => message.status)).toEqual(['failed', 'completed']);
     },
   );
 
@@ -473,17 +498,44 @@ describe('질문 전송', () => {
   });
 
   it('느린 응답에도 생성 중 표시와 입력 잠금을 유지하고 성공 후 정리한다', async () => {
-    vi.stubEnv('VITE_CHAT_MOCK_SCENARIO', 'slow');
+    let release: (() => void) | undefined;
+    server.use(
+      http.post(`${API_BASE_URL}/api/v1/chats/${emptyId}/messages`, async ({ request }) => {
+        const { question } = (await request.json()) as { question: string };
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json(
+          {
+            request_id: 'slow-response',
+            chat_id: emptyId,
+            question,
+            answer: '이야기해 줘서 고마워요.',
+            status: 'completed',
+            error_code: null,
+            created_at: '2026-10-05T03:00:00Z',
+            finished_at: '2026-10-05T03:00:01Z',
+          },
+          { status: 201 },
+        );
+      }),
+    );
     const user = renderPage(`/chats/${emptyId}`);
-    const input = await screen.findByRole('textbox', { name: '메시지' }, { timeout: 2500 });
-    await user.type(input, '천천히 답해 줘');
-    await user.click(screen.getByRole('button', { name: '보내기' }));
-    expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
-    expect(input).toBeDisabled();
-    await screen.findByText(/이야기해 줘서 고마워요/, {}, { timeout: 4500 });
-    expect(screen.queryByText('답변 생성 중')).not.toBeInTheDocument();
-    expect(input).toBeEnabled();
-  }, 10000);
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    try {
+      await user.type(input, '천천히 답해 줘');
+      await user.click(screen.getByRole('button', { name: '보내기' }));
+      await waitFor(() => expect(release).toBeDefined());
+      expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
+      expect(input).toBeDisabled();
+      release?.();
+      await screen.findByText(/이야기해 줘서 고마워요/);
+      expect(screen.queryByText('답변 생성 중')).not.toBeInTheDocument();
+      expect(input).toBeEnabled();
+    } finally {
+      release?.();
+    }
+  });
 
   it('전송 중 세션을 바꾸면 이전 요청을 중단하고 늦은 답변을 섞지 않는다', async () => {
     let release: (() => void) | undefined;

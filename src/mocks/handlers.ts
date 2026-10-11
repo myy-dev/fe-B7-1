@@ -148,26 +148,15 @@ function withinPeriod(time: string, start: string | null, end: string | null) {
 }
 
 function adminPage<T>(items: T[], page: number, size: number) {
-  const rows = import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'empty' ? [] : items;
   return HttpResponse.json({
-    items: rows.slice((page - 1) * size, page * size),
-    total: rows.length,
+    items: items.slice((page - 1) * size, page * size),
+    total: items.length,
     page,
     size,
   });
 }
 
-async function adminFailure(section: string) {
-  const scenario = import.meta.env.VITE_ADMIN_MOCK_SCENARIO;
-  await delay(scenario === 'slow' ? 1500 : 300);
-  return scenario === 'error' || scenario === `${section}-error`
-    ? chatError('DB_ERROR', '조회하지 못했어요. 다시 시도해 주세요.', 500)
-    : null;
-}
-
 let chatStore = makeChatStore();
-let sendFailures = new Set<string>();
-let deleteFailures = new Set<string>();
 let signupUsernames = new Set(['duck', 'taken']);
 const revokedTokens = new Set<string>();
 export function createMockLoginResponse(
@@ -226,8 +215,7 @@ export function resetAuthMocks() {
 }
 
 function makeChatStore() {
-  const items =
-    import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'empty' ? [] : structuredClone(exampleChats);
+  const items = structuredClone(exampleChats);
   return new Map<string, MockChat>(
     items.map((chat) => [chat.chat_id, { ...chat, user_id: 2, deleted_at: null }]),
   );
@@ -235,8 +223,6 @@ function makeChatStore() {
 
 export function resetChatMocks() {
   chatStore = makeChatStore();
-  sendFailures = new Set();
-  deleteFailures = new Set();
 }
 
 function chatError(
@@ -252,8 +238,7 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/admin/users`, async ({ request }) => {
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
-    const failure = await adminFailure('users');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     return adminPage(
@@ -271,8 +256,7 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/admin/users/:userId`, async ({ request, params }) => {
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
-    const failure = await adminFailure('user');
-    if (failure) return failure;
+    await delay(300);
     const id = positiveInteger(String(params.userId));
     if (!id) return chatError('INVALID_INPUT', '회원 주소를 확인해 주세요.', 422);
     const user = adminUsers.find((item) => item.id === id);
@@ -295,10 +279,8 @@ export const handlers = [
       return chatError('INVALID_ROLE', '역할은 admin 또는 user만 지정할 수 있습니다.', 422);
     if (id === mockCurrentUser(request).id && body.role !== 'admin')
       return chatError('CANNOT_DEMOTE_SELF', '자기 자신의 관리자 권한은 해제할 수 없습니다.', 403);
-    await delay(import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'slow' ? 1500 : 300);
+    await delay(300);
     if (request.signal.aborted) return HttpResponse.error();
-    if (import.meta.env.VITE_ADMIN_MOCK_SCENARIO === 'role-error')
-      return chatError('DB_ERROR', '권한을 변경하지 못했어요. 다시 시도해 주세요.', 500);
     const member = adminUsers.find((item) => item.id === id);
     if (!member) return chatError('USER_NOT_FOUND', '회원을 찾을 수 없어요.', 404);
     member.role = body.role;
@@ -308,8 +290,7 @@ export const handlers = [
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('sessions');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request, true);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     return adminPage(
@@ -322,8 +303,7 @@ export const handlers = [
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('session');
-    if (failure) return failure;
+    await delay(300);
     const id = String(params.chatId);
     const session = getAdminSessions(store).find((item) => item.chat_id === id);
     const chat = store.get(id);
@@ -335,8 +315,7 @@ export const handlers = [
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
     const store = chatStore;
-    const failure = await adminFailure('logs');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     const sessions = getAdminSessions(store).filter(
@@ -355,8 +334,7 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, async ({ request }) => {
     const unauthorized = adminAuthenticationError(request);
     if (unauthorized) return unauthorized;
-    const failure = await adminFailure('system');
-    if (failure) return failure;
+    await delay(300);
     const query = readAdminQuery(request);
     if (!query) return chatError('INVALID_INPUT', '조회 조건을 확인해 주세요.', 422);
     const rows = adminSystemLogs
@@ -377,9 +355,7 @@ export const handlers = [
     const error = authenticationError(request);
     if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'list-error')
-      return chatError('DB_ERROR', '대화 목록을 불러오지 못했어요.', 500);
+    await delay(350);
     const items = sortSessions(
       [...store.values()].filter(
         (chat) => !chat.deleted_at && chat.user_id === mockCurrentUser(request).id,
@@ -394,9 +370,7 @@ export const handlers = [
     const error = authenticationError(request);
     if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 600);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'create-error')
-      return chatError('DB_ERROR', '대화를 만들지 못했어요. 다시 시도해 주세요.', 500);
+    await delay(600);
     const session = { chat_id: crypto.randomUUID(), created_at: new Date().toISOString() };
     store.set(session.chat_id, {
       ...session,
@@ -410,11 +384,9 @@ export const handlers = [
     const error = authenticationError(request);
     if (error) return error;
     const store = chatStore;
-    await delay(import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'slow' ? 1500 : 350);
+    await delay(350);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(String(params.chatId)))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
-    if (import.meta.env.VITE_CHAT_MOCK_SCENARIO === 'detail-error')
-      return chatError('DB_ERROR', '대화를 불러오지 못했어요.', 500);
     const chat = store.get(String(params.chatId));
     return chat && !chat.deleted_at && chat.user_id === mockCurrentUser(request).id
       ? HttpResponse.json({
@@ -428,19 +400,13 @@ export const handlers = [
     const error = authenticationError(request);
     if (error) return error;
     const store = chatStore;
-    const failures = deleteFailures;
     const id = String(params.chatId);
-    const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
-    await delay(scenario === 'slow' ? 1500 : 600);
+    await delay(600);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(id))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
     const chat = store.get(id);
     if (!chat || chat.deleted_at || chat.user_id !== mockCurrentUser(request).id)
       return chatError('CHAT_NOT_FOUND', '대화를 찾을 수 없어요.', 404);
-    if (scenario === 'delete-error' && !failures.has(id)) {
-      failures.add(id);
-      return chatError('DB_ERROR', '대화를 삭제하지 못했어요. 다시 시도해 주세요.', 500);
-    }
     chat.deleted_at = new Date().toISOString();
     return new HttpResponse(null, { status: 204 });
   }),
@@ -448,8 +414,6 @@ export const handlers = [
     const error = authenticationError(request);
     if (error) return error;
     const store = chatStore;
-    const failures = sendFailures;
-    const scenario = import.meta.env.VITE_CHAT_MOCK_SCENARIO;
     const chatId = String(params.chatId);
     if (!/^[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}$/i.test(chatId))
       return chatError('INVALID_INPUT', '대화 주소를 확인해 주세요.', 422);
@@ -474,23 +438,9 @@ export const handlers = [
       finished_at: null,
     };
     chat.messages.push(message);
-    const fail = ['send-error', 'timeout'].includes(scenario ?? '') && !failures.has(chatId);
-    if (fail) failures.add(chatId);
     // 중단된 브라우저 요청도 서버 처리와 마찬가지로 기록의 완료까지 진행한다.
-    await delay(scenario === 'slow' ? 3500 : 800);
+    await delay(800);
     message.finished_at = new Date().toISOString();
-    if (fail) {
-      message.status = 'failed';
-      message.error_code = scenario === 'timeout' ? 'AI_TIMEOUT' : 'AI_UNAVAILABLE';
-      return chatError(
-        message.error_code,
-        scenario === 'timeout'
-          ? '응답 시간이 초과되었어요. 다시 보내 주세요.'
-          : '답변을 받지 못했어요. 다시 보내 주세요.',
-        scenario === 'timeout' ? 504 : 502,
-        message.request_id,
-      );
-    }
     message.status = 'completed';
     message.answer =
       question.includes('\n') || question.length > 200
@@ -502,9 +452,6 @@ export const handlers = [
   http.get(`${API_BASE_URL}/api/v1/auth/me`, async ({ request }) => {
     const unauthorized = authenticationError(request);
     if (unauthorized) return unauthorized;
-    const scenario = import.meta.env.VITE_AUTH_MOCK_SCENARIO;
-    if (scenario === 'slow') await delay(1500);
-    if (scenario === 'error') return chatError('DB_ERROR', '내 정보를 불러오지 못했어요.', 500);
     return HttpResponse.json(mockCurrentUser(request));
   }),
   http.post(`${API_BASE_URL}/api/v1/auth/logout`, async ({ request }) => {

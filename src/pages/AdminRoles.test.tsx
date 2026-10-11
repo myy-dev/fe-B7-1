@@ -84,7 +84,7 @@ describe('회원 권한 표시·변경', () => {
     expect(
       within(screen.getByRole('group', { name: '회원 권한' })).getByText(label),
     ).toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(
       screen.getByRole('button', { name: `${role === 'admin' ? '사용자' : '관리자'}로 변경` }),
     ).toBeEnabled();
@@ -257,8 +257,15 @@ describe('역할 변경 MSW 계약', () => {
       }),
     ).rejects.toMatchObject({ status: 403 });
   });
-  it('권한 변경 오류 시나리오는 현재 권한을 유지한다', async () => {
-    vi.stubEnv('VITE_ADMIN_MOCK_SCENARIO', 'role-error');
+  it('권한 변경 요청이 실패하면 현재 권한을 유지한다', async () => {
+    server.use(
+      http.patch(`${API_BASE_URL}/api/v1/admin/users/2/role`, () =>
+        HttpResponse.json(
+          { error: { code: 'DB_ERROR', message: '권한 변경 실패', request_id: 'role-failed' } },
+          { status: 500 },
+        ),
+      ),
+    );
     await expect(
       apiRequest('/api/v1/admin/users/2/role', {
         method: 'PATCH',
