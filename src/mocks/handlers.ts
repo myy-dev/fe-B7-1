@@ -104,6 +104,9 @@ const adminSystemLogs: SystemLog[] = Array.from({ length: 30 }, (_, index) => {
       event === 'ai_call_failed' ? 'ERROR' : event === 'user_login_failed' ? 'WARNING' : 'INFO',
     event,
     request_id: userId ? exampleChats[userId - 1].messages[0].request_id : null,
+    method: event === 'request_received' ? 'POST' : null,
+    path: event === 'request_received' ? `/api/v1/chats/${exampleChats[0].chat_id}/messages` : null,
+    status_code: event === 'user_login_failed' ? 401 : null,
     user_id: userId,
   };
 });

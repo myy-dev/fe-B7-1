@@ -48,6 +48,9 @@ export interface SystemLog {
   level: string;
   event: string;
   request_id: string | null;
+  method: string | null;
+  path: string | null;
+  status_code: number | null;
   user_id: number | null;
 }
 

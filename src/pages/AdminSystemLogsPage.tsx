@@ -40,9 +40,12 @@ export default function AdminSystemLogsPage() {
                 <tr>
                   <th>시각 (KST)</th>
                   <th>레벨</th>
-                  <th>이벤트</th>
-                  <th>요청 ID</th>
-                  <th>회원 번호(PK)</th>
+                  <th className="min-w-44">이벤트</th>
+                  <th>메서드</th>
+                  <th className="min-w-64">경로</th>
+                  <th className="whitespace-nowrap">상태 코드</th>
+                  <th className="min-w-48">요청 ID</th>
+                  <th className="whitespace-nowrap">회원 번호(PK)</th>
                 </tr>
               </thead>
               <tbody>
@@ -57,6 +60,9 @@ export default function AdminSystemLogsPage() {
                       </span>
                     </td>
                     <td className="max-w-sm font-mono text-xs wrap-anywhere">{log.event}</td>
+                    <td className="font-mono text-xs">{log.method ?? '—'}</td>
+                    <td className="max-w-xs font-mono text-xs wrap-anywhere">{log.path ?? '—'}</td>
+                    <td className="font-mono text-xs">{log.status_code ?? '—'}</td>
                     <td className="max-w-sm font-mono text-xs wrap-anywhere">
                       {log.request_id || '—'}
                     </td>

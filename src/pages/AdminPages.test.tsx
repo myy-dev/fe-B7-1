@@ -234,6 +234,46 @@ describe('관리자 회원·세션 조회', () => {
 });
 
 describe('관리자 조회 조건과 시스템 로그', () => {
+  it('요청 메서드·경로·상태 코드를 표시하고 없는 값은 대시로 표시한다', async () => {
+    const logs: SystemLog[] = [
+      {
+        timestamp: '2026-10-11T07:00:00Z',
+        level: 'ERROR',
+        event: 'request_completed',
+        request_id: 'failed-request',
+        method: 'POST',
+        path: '/api/v1/auth/login',
+        status_code: 503,
+        user_id: 2,
+      },
+      {
+        timestamp: '2026-10-11T06:00:00Z',
+        level: 'INFO',
+        event: 'db_save_succeeded',
+        request_id: null,
+        method: null,
+        path: null,
+        status_code: null,
+        user_id: null,
+      },
+    ];
+    server.use(
+      http.get(`${API_BASE_URL}/api/v1/admin/system-logs`, () =>
+        HttpResponse.json({ items: logs, total: 2, page: 1, size: 20 }),
+      ),
+    );
+    renderPage('/admin/system-logs');
+    const table = await screen.findByRole('region', { name: '시스템 로그 표' });
+    const rows = within(table).getAllByRole('row');
+    expect(within(table).getByRole('columnheader', { name: '메서드' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '경로' })).toBeInTheDocument();
+    expect(within(table).getByRole('columnheader', { name: '상태 코드' })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole('cell', { name: 'POST' })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole('cell', { name: '/api/v1/auth/login' })).toBeInTheDocument();
+    expect(within(rows[1]).getByRole('cell', { name: '503' })).toBeInTheDocument();
+    expect(within(rows[2]).getAllByRole('cell', { name: '—' })).toHaveLength(5);
+  });
+
   it('회원·KST 기간 조건을 UTC 요청에 적용하고 페이지를 초기화한다', async () => {
     let query: URLSearchParams | undefined;
     server.use(
@@ -312,7 +352,7 @@ describe('관리자 조회 조건과 시스템 로그', () => {
     renderPage('/admin/system-logs?start=2026-10-05T07:00:00Z&end=2026-10-05T07:00:00Z');
     const table = await screen.findByRole('region', { name: '시스템 로그 표' });
     expect(within(table).getAllByText('request_received')).toHaveLength(2);
-    expect(within(table).getAllByText('—')).toHaveLength(4);
+    expect(within(table).getAllByText('—')).toHaveLength(6);
     expect(screen.getByLabelText('조회 시작 시각 (KST)')).toHaveValue('2026-10-05T16:00');
     expect(screen.getByText('총 2건 · 1 / 1 페이지')).toBeInTheDocument();
   });
@@ -388,6 +428,11 @@ describe('관리자 MSW API 계약', () => {
     expect(
       result.items.every((log) => log.level === 'ERROR' && log.event === 'ai_call_failed'),
     ).toBe(true);
+    expect(result.items[0]).toMatchObject({
+      method: null,
+      path: null,
+      status_code: null,
+    });
     const records = await apiRequest<AdminPage<ChatMessage>>(
       '/api/v1/admin/logs?user_id=2&start=2026-10-05T03:01:00Z&end=2026-10-05T03:02:00Z',
     );
