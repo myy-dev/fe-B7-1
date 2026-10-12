@@ -34,7 +34,6 @@ export interface AdminUserDetail extends AdminUser {
 export interface AdminSession {
   chat_id: string;
   user_id: number;
-  title: string;
   created_at: string;
   message_count: number;
 }
