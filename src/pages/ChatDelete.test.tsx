@@ -274,6 +274,70 @@ describe('대화 삭제', () => {
     }
   });
 
+  it.each(['/chats', `/chats/${firstId}`, `/chats/${emptyId}`])(
+    '늦은 빈 대화 재사용 응답이 삭제된 대화를 다시 추가하거나 열지 않는다 (%s)',
+    async (path) => {
+      let release: (() => void) | undefined;
+      server.use(
+        http.post(
+          `${API_BASE_URL}/api/v1/chats`,
+          async () => {
+            const session = { chat_id: emptyId, created_at: '2026-10-03T01:30:00Z' };
+            await new Promise<void>((resolve) => {
+              release = resolve;
+            });
+            return HttpResponse.json(session, { status: 200 });
+          },
+          { once: true },
+        ),
+      );
+      const user = renderPage(path);
+      await screen.findByRole('navigation', { name: '대화 목록' });
+      const input =
+        path === `/chats/${firstId}`
+          ? await screen.findByRole('textbox', { name: '메시지' })
+          : null;
+      if (input) await user.type(input, '계속 쓸 질문');
+      try {
+        await user.click(
+          screen.getByRole('button', { name: path === '/chats' ? '새 대화 시작' : '새 대화' }),
+        );
+        await waitFor(() => expect(release).toBeDefined());
+        const dialog = await openDelete(user, emptyDelete);
+        await user.click(within(dialog).getByRole('button', { name: '삭제' }));
+        await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+        expect(screen.queryByRole('button', { name: emptyDelete })).not.toBeInTheDocument();
+
+        await act(async () => release?.());
+        const expectedPath = path === `/chats/${emptyId}` ? '/chats' : path;
+        const label = expectedPath === '/chats' ? '새 대화 시작' : '새 대화';
+        await waitFor(() => expect(screen.getByRole('button', { name: label })).toBeEnabled());
+        expect(screen.getByLabelText('현재 경로').textContent).toBe(expectedPath);
+        expect(
+          screen.queryByRole('link', { name: '10월 3일 오전 10:30 대화' }),
+        ).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: emptyDelete })).not.toBeInTheDocument();
+        expect(
+          within(screen.getByRole('navigation', { name: '대화 목록' })).getAllByRole('link'),
+        ).toHaveLength(2);
+        expect(
+          screen.queryByRole('heading', { name: '대화를 찾을 수 없어요.' }),
+        ).not.toBeInTheDocument();
+        if (input) expect(input).toHaveValue('계속 쓸 질문');
+
+        // 무시한 응답이 요청 상태를 잠그지 않아 다음 생성은 정상적으로 진행한다.
+        await user.click(screen.getByRole('button', { name: label }));
+        await screen.findByRole('heading', { name: '새 대화' });
+        expect(screen.getByRole('link', { current: 'page' })).not.toHaveAttribute(
+          'href',
+          `/chats/${emptyId}`,
+        );
+      } finally {
+        release?.();
+      }
+    },
+  );
+
   it('전송 중 현재 대화를 삭제하면 이전 답변 요청도 화면에서 중단한다', async () => {
     let release: (() => void) | undefined;
     let signal: AbortSignal | undefined;

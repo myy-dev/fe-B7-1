@@ -48,13 +48,21 @@ export default function useChatSessions() {
     setListAttempt((current) => current + 1);
   }
 
-  function addSession(session: ChatSession) {
-    createdSessions.current.push(session);
+  function addSession(session: ChatSession): boolean {
+    if (deletedSessions.current.has(session.chat_id)) return false;
+    createdSessions.current = [
+      session,
+      ...createdSessions.current.filter((item) => item.chat_id !== session.chat_id),
+    ];
     setList((current) => ({
       status: current.status === 'error' ? 'error' : 'success',
-      items: sortSessions([session, ...current.items]),
+      items: sortSessions([
+        session,
+        ...current.items.filter((item) => item.chat_id !== session.chat_id),
+      ]),
       error: current.error,
     }));
+    return true;
   }
 
   function removeSession(id: string) {

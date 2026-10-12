@@ -99,6 +99,21 @@ describe('채팅 세션 화면', () => {
     expect(screen.getByRole('link', { current: 'page' })).toBeInTheDocument();
   });
 
+  it('기존 빈 대화를 반환받아도 목록을 중복 추가하지 않는다', async () => {
+    const user = renderPage();
+    const nav = await screen.findByRole('navigation', { name: '대화 목록' });
+    await user.click(screen.getByRole('button', { name: '새 대화 시작' }));
+    await screen.findByRole('textbox', { name: '메시지' });
+    expect(screen.getByLabelText('현재 경로')).toHaveTextContent(`/chats/${emptyId}`);
+    await user.click(screen.getByRole('button', { name: '새 대화' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '새 대화' })).toBeEnabled());
+    expect(within(nav).getAllByRole('link')).toHaveLength(3);
+    expect(screen.getByRole('link', { current: 'page' })).toHaveAttribute(
+      'href',
+      `/chats/${emptyId}`,
+    );
+  });
+
   it('목록 오류 후 재시도한다', async () => {
     server.use(
       http.get(
@@ -286,6 +301,7 @@ describe('채팅 세션 화면', () => {
 
 describe('채팅 MSW 계약', () => {
   it('생성한 세션을 목록과 상세에서 조회하고 새로 초기화하면 제거한다', async () => {
+    await apiRequest(`/api/v1/chats/${emptyId}`, { method: 'DELETE' });
     const session = await apiRequest<ChatSession>('/api/v1/chats', { method: 'POST' });
     const list = await apiRequest<{ items: ChatSession[] }>('/api/v1/chats');
     expect(list.items).toContainEqual(session);
@@ -296,6 +312,37 @@ describe('채팅 MSW 계약', () => {
       status: 404,
       message: '대화를 찾을 수 없어요.',
     });
+  });
+
+  it('빈 대화는 200으로 재사용하고 질문 기록이 생기거나 삭제되면 새로 생성한다', async () => {
+    const token = createMockLoginResponse().access_token;
+    const create = () =>
+      fetch(`${API_BASE_URL}/api/v1/chats`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    const reused = await create();
+    expect(reused.status).toBe(200);
+    expect(await reused.json()).toMatchObject({ chat_id: emptyId });
+    // 현재 로그인한 사용자와 같은 소유자이며 토큰만 다르다.
+    await apiRequest(`/api/v1/chats/${emptyId}/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: '빈 대화에 첫 질문' }),
+    });
+    const created = await create();
+    expect(created.status).toBe(201);
+    const session = (await created.json()) as ChatSession;
+    expect(session.chat_id).not.toBe(emptyId);
+    const repeated = await Promise.all([create(), create()]);
+    for (const response of repeated) {
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(session);
+    }
+    await apiRequest(`/api/v1/chats/${session.chat_id}`, { method: 'DELETE' });
+    const replacement = await create();
+    expect(replacement.status).toBe(201);
+    expect((await replacement.json()).chat_id).not.toBe(session.chat_id);
   });
 });
 
@@ -592,7 +639,7 @@ describe('질문 MSW 계약', () => {
       body: JSON.stringify({ question }),
     });
 
-  it('백엔드와 같이 동시 전송을 허용하며 각 기록의 식별자를 유지한다', async () => {
+  it('처리 중인 사용자의 다른 질문을 409로 거절하고 완료 후 전송을 허용한다', async () => {
     const pending = send('  질문  ');
     const detail = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
     expect(detail.messages[0]).toMatchObject({
@@ -601,11 +648,43 @@ describe('질문 MSW 계약', () => {
       answer: null,
       finished_at: null,
     });
-    const second = send('중복 질문');
-    const [result, secondResult] = await Promise.all([pending, second]);
+    await expect(send('중복 질문', firstId)).rejects.toMatchObject({
+      status: 409,
+      code: 'CHAT_BUSY',
+    });
+    const result = await pending;
     expect(result).toMatchObject({ question: '질문', status: 'completed', error_code: null });
     const saved = await apiRequest<ChatDetail>(`/api/v1/chats/${emptyId}`);
-    expect(saved.messages).toEqual([result, secondResult]);
+    expect(saved.messages).toEqual([result]);
+    const secondResult = await send('다음 질문');
+    expect(secondResult.status).toBe('completed');
+  });
+
+  it('전체 동시 질문 3개 초과 시 503으로 거절하고 처리 종료 후 자리를 해제한다', async () => {
+    const users = await Promise.all(
+      [2, 3, 4, 5].map(async (userId) => {
+        const token = createMockLoginResponse(1800, 'user', userId).access_token;
+        const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
+        const response = await fetch(`${API_BASE_URL}/api/v1/chats`, { method: 'POST', headers });
+        const session = (await response.json()) as ChatSession;
+        return { session, headers };
+      }),
+    );
+    const sendForUser = (index: number) =>
+      fetch(`${API_BASE_URL}/api/v1/chats/${users[index].session.chat_id}/messages`, {
+        method: 'POST',
+        headers: users[index].headers,
+        body: JSON.stringify({ question: '동시 질문' }),
+      });
+    const responses = await Promise.all(users.map((_, index) => sendForUser(index)));
+    expect(responses.map((response) => response.status).sort()).toEqual([201, 201, 201, 503]);
+    const rejected = responses.findIndex((response) => response.status === 503);
+    expect(await responses[rejected].json()).toMatchObject({ error: { code: 'SERVER_BUSY' } });
+    const detail = await fetch(`${API_BASE_URL}/api/v1/chats/${users[rejected].session.chat_id}`, {
+      headers: users[rejected].headers,
+    });
+    expect((await detail.json()).messages).toEqual([]);
+    expect((await sendForUser(rejected)).status).toBe(201);
   });
 
   it.each([' ', null, 123])('유효하지 않은 질문 %s는 저장하지 않는다', async (question) => {

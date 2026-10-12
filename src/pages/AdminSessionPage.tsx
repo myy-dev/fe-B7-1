@@ -40,9 +40,7 @@ export default function AdminSessionPage() {
         <section aria-label="세션 대화" className="card min-w-0 border border-base-300 bg-base-100">
           <div className="card-body gap-6 p-5 sm:p-8">
             <header className="space-y-2 border-b border-base-300 pb-4">
-              <h2 className="font-mono text-lg font-bold wrap-anywhere">
-                {resource.data.chat_id}
-              </h2>
+              <h2 className="font-mono text-lg font-bold wrap-anywhere">{resource.data.chat_id}</h2>
               <p className="text-sm text-base-content/70">
                 {formatAdminTime(resource.data.created_at)} · 질문 {resource.data.message_count}건
               </p>

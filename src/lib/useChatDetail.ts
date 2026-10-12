@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, apiRequest } from './api';
 import type { ChatDetail, ChatMessage } from './chats';
+import type useChatCooldown from './useChatCooldown';
 
 type DetailState = {
   status: 'loading' | 'success' | 'error';
@@ -12,7 +13,10 @@ type Recovery = { question: string; knownIds: Set<string>; requestId?: string };
 const pollInterval = 1500;
 const pollDuration = 60_000;
 
-export default function useChatDetail(chatId: string) {
+export default function useChatDetail(
+  chatId: string,
+  cooldown: Pick<ReturnType<typeof useChatCooldown>, 'startCooldown' | 'isCoolingDown'>,
+) {
   const [state, setState] = useState<DetailState>({
     status: 'loading',
     detail: null,
@@ -182,7 +186,15 @@ export default function useChatDetail(chatId: string) {
   }
 
   async function sendQuestion(question: string): Promise<boolean> {
-    if (!question || sendRequest.current || !state.detail || pending || uncertain) return false;
+    if (
+      !question ||
+      sendRequest.current ||
+      !state.detail ||
+      pending ||
+      uncertain ||
+      cooldown.isCoolingDown()
+    )
+      return false;
     const controller = new AbortController();
     sendRequest.current = controller;
     setSending(true);
@@ -223,6 +235,15 @@ export default function useChatDetail(chatId: string) {
         cause instanceof ApiError ? cause.message : '메시지를 보내지 못했어요. 다시 시도해 주세요.',
       );
       setOutgoing(null);
+      if (cause instanceof ApiError && cause.code === 'SERVER_BUSY') {
+        cooldown.startCooldown();
+        return false;
+      }
+      if (cause instanceof ApiError && cause.code === 'CHAT_BUSY') {
+        // 처리 전에 거절된 질문이므로 이번 요청의 저장 여부를 복구하지 않는다.
+        await loadDetail(controller);
+        return false;
+      }
       // 네트워크 오류도 서버 저장 이후 발생할 수 있다. 자동 재전송하지 않는다.
       if (!(cause instanceof ApiError) || cause.status >= 500 || cause.status === 409) {
         recovery.current = {

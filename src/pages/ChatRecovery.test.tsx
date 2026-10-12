@@ -38,6 +38,140 @@ function renderPage() {
 }
 beforeEach(() => signIn(createMockLoginResponse()));
 
+describe('질문 처리 제한', () => {
+  it.each([
+    [0, 5],
+    [0.999, 10],
+  ])('SERVER_BUSY는 랜덤 대기 시간 동안 전송만 막는다 (%s → %s초)', async (random, seconds) => {
+    let calls = 0;
+    server.use(
+      http.get(path, () => HttpResponse.json(detail([]))),
+      http.post(`${path}/messages`, () => {
+        calls++;
+        return calls === 1
+          ? HttpResponse.json(
+              { error: { code: 'SERVER_BUSY', message: '현재 처리 중인 질문이 많습니다.' } },
+              { status: 503 },
+            )
+          : HttpResponse.json(message('completed'), { status: 201 });
+      }),
+    );
+    const user = renderPage();
+    const input = await screen.findByRole('textbox', { name: '메시지' });
+    const randomValue = vi.spyOn(Math, 'random').mockReturnValue(random);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    const started = Date.now();
+    try {
+      await user.type(input, '복구할 질문');
+      await user.click(screen.getByRole('button', { name: '보내기' }));
+      const button = await screen.findByRole('button', { name: `${seconds}초 후 보내기` });
+      expect(button).toBeDisabled();
+      expect(input).toBeEnabled();
+      expect(input).toHaveValue('복구할 질문');
+      expect(screen.queryByText(/전송 결과를 확인하고/)).not.toBeInTheDocument();
+      await user.type(input, ' 수정');
+      await user.keyboard('{Enter}');
+      await user.click(button);
+      expect(input).toHaveValue('복구할 질문 수정');
+      expect(calls).toBe(1);
+      now.mockReturnValue(started + 2000);
+      fireEvent(window, new Event('focus'));
+      expect(
+        await screen.findByRole('button', { name: `${seconds - 2}초 후 보내기` }),
+      ).toBeDisabled();
+      now.mockReturnValue(started + seconds * 1000);
+      fireEvent(document, new Event('visibilitychange'));
+      await waitFor(() => expect(screen.getByRole('button', { name: '보내기' })).toBeEnabled());
+      expect(calls).toBe(1);
+      await user.click(input);
+      await user.keyboard('{Enter}');
+      await screen.findByText('저장된 답변');
+      expect(input).toHaveValue('');
+      expect(calls).toBe(2);
+    } finally {
+      randomValue.mockRestore();
+      now.mockRestore();
+    }
+  });
+
+  it('대기 중 다른 대화와 홈을 거쳐 돌아와도 제한 시간을 유지한다', async () => {
+    let calls = 0;
+    server.use(
+      http.post(`${path}/messages`, () => {
+        calls++;
+        return HttpResponse.json(
+          { error: { code: 'SERVER_BUSY', message: '현재 처리 중인 질문이 많습니다.' } },
+          { status: 503 },
+        );
+      }),
+      http.post(`${API_BASE_URL}/api/v1/chats/${firstId}/messages`, () => {
+        calls++;
+        return HttpResponse.json(message('completed'), { status: 201 });
+      }),
+    );
+    const user = renderPage();
+    const randomValue = vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    const now = vi.spyOn(Date, 'now').mockReturnValue(Date.now());
+    try {
+      await user.type(await screen.findByRole('textbox', { name: '메시지' }), '거절할 질문');
+      await user.click(screen.getByRole('button', { name: '보내기' }));
+      await screen.findByRole('button', { name: '10초 후 보내기' });
+      const nav = await screen.findByRole('navigation', { name: '대화 목록' });
+      await user.click(within(nav).getByRole('link', { name: /10월 5일/ }));
+      const input = await screen.findByRole('textbox', { name: '메시지' });
+      await user.type(input, '다른 대화의 질문');
+      await user.keyboard('{Enter}');
+      expect(screen.getByRole('button', { name: '10초 후 보내기' })).toBeDisabled();
+      expect(input).toBeEnabled();
+      expect(calls).toBe(1);
+      await user.click(screen.getByRole('link', { name: '꽥꽥이 처음 화면' }));
+      await user.click(await screen.findByRole('button', { name: '새 대화 시작' }));
+      await screen.findByRole('textbox', { name: '메시지' });
+      expect(screen.getByRole('button', { name: '10초 후 보내기' })).toBeDisabled();
+      expect(calls).toBe(1);
+    } finally {
+      randomValue.mockRestore();
+      now.mockRestore();
+    }
+  });
+
+  it.each([false, true])(
+    'CHAT_BUSY는 이번 질문의 복구 대신 현재 기록을 확인한다 (같은 대화: %s)',
+    async (sameChat) => {
+      const saved = detail([]);
+      server.use(
+        http.get(path, () => HttpResponse.json(saved)),
+        http.post(`${path}/messages`, () => {
+          if (sameChat) saved.messages.push(message());
+          return HttpResponse.json(
+            { error: { code: 'CHAT_BUSY', message: '다른 질문을 처리 중입니다.' } },
+            { status: 409 },
+          );
+        }),
+      );
+      const user = renderPage();
+      const input = await screen.findByRole('textbox', { name: '메시지' });
+      await user.type(input, '거절된 질문');
+      await user.click(screen.getByRole('button', { name: '보내기' }));
+      await screen.findByText('다른 질문을 처리 중입니다.');
+      await waitFor(() => {
+        if (sameChat) expect(input).toBeDisabled();
+        else expect(input).toBeEnabled();
+      });
+      expect(input).toHaveValue('거절된 질문');
+      expect(screen.queryByText(/전송 결과를 확인하고/)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /초 후 보내기/ })).not.toBeInTheDocument();
+      if (sameChat) {
+        saved.messages[0] = message('completed');
+        await user.click(screen.getByRole('button', { name: '기록 다시 확인' }));
+        await screen.findByText('저장된 답변');
+        expect(input).toBeEnabled();
+        expect(input).toHaveValue('거절된 질문');
+      }
+    },
+  );
+});
+
 describe('대화 결과 복구', () => {
   it('저장된 pending 상태에서 추가 전송을 막고 폴링으로 완료 결과를 표시한다', async () => {
     let completed = false;

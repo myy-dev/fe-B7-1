@@ -6,8 +6,15 @@ import ChatComposer from './ChatComposer';
 import ConfirmDialog from './ConfirmDialog';
 import { formatChatTime } from '../lib/chats';
 import useChatDetail from '../lib/useChatDetail';
+import type useChatCooldown from '../lib/useChatCooldown';
 
-export default function ChatDetailView({ chatId }: { chatId: string }) {
+export default function ChatDetailView({
+  chatId,
+  cooldown,
+}: {
+  chatId: string;
+  cooldown: ReturnType<typeof useChatCooldown>;
+}) {
   const {
     state,
     sending,
@@ -24,7 +31,7 @@ export default function ChatDetailView({ chatId }: { chatId: string }) {
     allowRetry,
     sendQuestion,
     clearSendError,
-  } = useChatDetail(chatId);
+  } = useChatDetail(chatId, cooldown);
   const history = useRef<HTMLDivElement>(null);
   const followLatest = useRef(true);
   const [confirmRetry, setConfirmRetry] = useState(false);
@@ -142,6 +149,7 @@ export default function ChatDetailView({ chatId }: { chatId: string }) {
               key={clearVersion}
               disabled={sending || pending || uncertain}
               sending={sending}
+              cooldownSeconds={cooldown.remainingSeconds}
               onSend={sendQuestion}
               onChange={clearSendError}
             />
