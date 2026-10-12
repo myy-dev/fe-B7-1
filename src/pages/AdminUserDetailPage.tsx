@@ -77,7 +77,7 @@ export default function AdminUserDetailPage() {
                 <AdminTable label="회원 대화 세션 표">
                   <thead>
                     <tr>
-                      <th>대화</th>
+                      <th>세션 ID</th>
                       <th>생성 시각 (KST)</th>
                       <th>질문 수</th>
                       <th>상세</th>
@@ -86,11 +86,8 @@ export default function AdminUserDetailPage() {
                   <tbody>
                     {sessions.data.items.map((session) => (
                       <tr key={session.chat_id}>
-                        <td>
-                          <p className="max-w-sm wrap-anywhere">{session.title || '새 대화'}</p>
-                          <p className="mt-1 max-w-sm font-mono text-xs wrap-anywhere text-base-content/60">
-                            {session.chat_id}
-                          </p>
+                        <td className="max-w-sm font-mono text-xs wrap-anywhere">
+                          {session.chat_id}
                         </td>
                         <td className="whitespace-nowrap">{formatAdminTime(session.created_at)}</td>
                         <td>{session.message_count}</td>
@@ -98,7 +95,7 @@ export default function AdminUserDetailPage() {
                           <Link
                             className="btn btn-ghost btn-sm"
                             to={`/admin/sessions/${session.chat_id}`}
-                            aria-label={`${session.title || '새 대화'} 대화 보기`}
+                            aria-label={`세션 ${session.chat_id} 보기`}
                           >
                             보기
                           </Link>

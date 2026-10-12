@@ -79,9 +79,10 @@ describe('관리자 회원·세션 조회', () => {
     const sessions = await screen.findByRole('region', { name: '회원 대화 세션 표' });
     expect(within(sessions).getByText(firstId)).toBeInTheDocument();
     expect(within(sessions).getByText(secondId)).toBeInTheDocument();
-    await user.click(screen.getByRole('link', { name: '오늘 하루가 조금 지쳤어. 대화 보기' }));
+    await user.click(screen.getByRole('link', { name: `세션 ${firstId} 보기` }));
     const chat = await screen.findByRole('list', { name: '대화 기록' });
     expect(within(chat).getByText('기분 전환할 만한 작은 일이 있을까?')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: firstId })).toBeInTheDocument();
     expect(screen.queryByRole('textbox', { name: '메시지' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '회원 번호(PK) 2' }));
     await user.click(await screen.findByRole('link', { name: '회원 대화 기록' }));
@@ -105,9 +106,7 @@ describe('관리자 회원·세션 조회', () => {
     await screen.findByText('아직 대화가 없어요.');
     await user.click(screen.getByRole('link', { name: '회원 목록' }));
     await user.click(await screen.findByRole('link', { name: '사용자B 회원 상세' }));
-    await user.click(
-      await screen.findByRole('link', { name: /이 긴 주소도 읽어 줄래.*대화 보기/ }),
-    );
+    await user.click(await screen.findByRole('link', { name: `세션 ${secondId} 보기` }));
     await screen.findByText('응답 시간이 초과되었어요.');
     expect(screen.getByText('답변 생성 중')).toBeInTheDocument();
   });
@@ -416,7 +415,8 @@ describe('관리자 MSW API 계약', () => {
         .map((log) => log.request_id)
         .sort(),
     ).toEqual(detail.messages.map((message) => message.request_id).sort());
-    expect(detail.title).toBe(detail.messages[0].question);
+    expect(sessions.items[0]).not.toHaveProperty('title');
+    expect(detail).not.toHaveProperty('title');
   });
 
   it('기간·레벨·이벤트로 필터한 뒤 전체 수량과 페이지를 계산한다', async () => {

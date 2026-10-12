@@ -119,7 +119,6 @@ function getAdminSessions(store: Map<string, MockChat>) {
   return sortSessions([...store.values()]).map((chat) => ({
     chat_id: chat.chat_id,
     user_id: chat.user_id,
-    title: chat.messages[0]?.question ?? '',
     created_at: chat.created_at,
     message_count: chat.messages.length,
   }));
