@@ -6,7 +6,7 @@ import type { ChatSession } from '../lib/chats';
 interface NewChatButtonProps {
   label?: string;
   selection?: string;
-  onCreated: (session: ChatSession) => void;
+  onCreated: (session: ChatSession) => boolean;
 }
 
 export default function NewChatButton({
@@ -38,7 +38,7 @@ export default function NewChatButton({
         signal: controller.signal,
       });
       if (controller.signal.aborted) return;
-      onCreated(session);
+      if (!onCreated(session)) return;
       if (selectionVersion.current === startingSelection)
         navigate(`/chats/${encodeURIComponent(session.chat_id)}`);
     } catch (cause) {

@@ -9,11 +9,13 @@ function resizeQuestionInput(element: HTMLTextAreaElement | null) {
 export default function ChatComposer({
   disabled,
   sending,
+  cooldownSeconds,
   onSend,
   onChange,
 }: {
   disabled: boolean;
   sending: boolean;
+  cooldownSeconds: number;
   onSend: (question: string) => Promise<boolean>;
   onChange: () => void;
 }) {
@@ -34,7 +36,7 @@ export default function ChatComposer({
   }, [disabled]);
   async function submit() {
     const question = draft.trim();
-    if (!question || disabled || submitting.current) return;
+    if (!question || disabled || cooldownSeconds > 0 || submitting.current) return;
     submitting.current = true;
     try {
       if (await onSend(question)) setDraft('');
@@ -91,13 +93,15 @@ export default function ChatComposer({
         <button
           type="submit"
           className="btn shrink-0 btn-primary"
-          disabled={!draft.trim() || disabled}
+          disabled={!draft.trim() || disabled || cooldownSeconds > 0}
         >
           {sending ? (
             <>
               <span aria-hidden="true" className="loading loading-sm loading-spinner" />
               전송 중…
             </>
+          ) : cooldownSeconds > 0 ? (
+            `${cooldownSeconds}초 후 보내기`
           ) : (
             '보내기'
           )}

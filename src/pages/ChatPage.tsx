@@ -7,6 +7,7 @@ import NewChatButton from '../components/NewChatButton';
 import SessionList from '../components/SessionList';
 import type { ChatSession } from '../lib/chats';
 import useChatSessions from '../lib/useChatSessions';
+import useChatCooldown from '../lib/useChatCooldown';
 import HomePage from './HomePage';
 
 export default function ChatPage() {
@@ -22,6 +23,7 @@ function ChatWorkspace() {
   const navigate = useNavigate();
   const currentChatId = useRef(chatId);
   const { list, retryList, addSession, removeSession } = useChatSessions();
+  const cooldown = useChatCooldown();
   const [deleteTarget, setDeleteTarget] = useState<ChatSession | null>(null);
   useEffect(() => {
     currentChatId.current = chatId;
@@ -57,7 +59,7 @@ function ChatWorkspace() {
           </div>
         </div>
       </aside>
-      {chatId ? <ChatDetailView key={chatId} chatId={chatId} /> : <HomePage />}
+      {chatId ? <ChatDetailView key={chatId} chatId={chatId} cooldown={cooldown} /> : <HomePage />}
       {deleteDialog}
     </div>
   );

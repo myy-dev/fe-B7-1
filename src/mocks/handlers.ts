@@ -159,6 +159,7 @@ function adminPage<T>(items: T[], page: number, size: number) {
 }
 
 let chatStore = makeChatStore();
+let activeChatUsers = new Set<number>();
 let signupUsernames = new Set(['duck', 'taken']);
 const revokedTokens = new Set<string>();
 export function createMockLoginResponse(
@@ -225,6 +226,7 @@ function makeChatStore() {
 
 export function resetChatMocks() {
   chatStore = makeChatStore();
+  activeChatUsers = new Set();
 }
 
 function chatError(
@@ -373,10 +375,18 @@ export const handlers = [
     if (error) return error;
     const store = chatStore;
     await delay(600);
+    const userId = mockCurrentUser(request).id;
+    const emptyChat = sortSessions(
+      [...store.values()].filter(
+        (chat) => !chat.deleted_at && chat.user_id === userId && chat.messages.length === 0,
+      ),
+    )[0];
+    if (emptyChat)
+      return HttpResponse.json({ chat_id: emptyChat.chat_id, created_at: emptyChat.created_at });
     const session = { chat_id: crypto.randomUUID(), created_at: new Date().toISOString() };
     store.set(session.chat_id, {
       ...session,
-      user_id: mockCurrentUser(request).id,
+      user_id: userId,
       deleted_at: null,
       messages: [],
     });
@@ -429,27 +439,42 @@ export const handlers = [
         : '';
     if (!question) return chatError('INVALID_INPUT', '메시지를 입력해 주세요.', 422);
 
-    const message: ChatMessage = {
-      request_id: crypto.randomUUID(),
-      chat_id: chatId,
-      question,
-      answer: null,
-      status: 'pending',
-      error_code: null,
-      created_at: new Date().toISOString(),
-      finished_at: null,
-    };
-    chat.messages.push(message);
-    // 중단된 브라우저 요청도 서버 처리와 마찬가지로 기록의 완료까지 진행한다.
-    await delay(800);
-    message.finished_at = new Date().toISOString();
-    message.status = 'completed';
-    message.answer =
-      question.includes('\n') || question.length > 200
-        ? '긴 이야기도 잘 읽었어요. 꽥!\n\n한 가지씩 천천히 이야기해 봐요. 오늘 가장 마음에 남은 일은 무엇인가요?\n\n' +
-          '작은 이야기부터 시작해도 괜찮아요. 꽥꽥이가 함께할게요. '.repeat(12)
-        : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
-    return HttpResponse.json(message, { status: 201 });
+    const userId = mockCurrentUser(request).id;
+    const activeUsers = activeChatUsers;
+    if (activeUsers.has(userId))
+      return chatError('CHAT_BUSY', '다른 질문을 처리 중입니다. 잠시 후 다시 시도해 주세요.', 409);
+    if (activeUsers.size >= 3)
+      return chatError(
+        'SERVER_BUSY',
+        '현재 처리 중인 질문이 많습니다. 잠시 후 다시 시도해 주세요.',
+        503,
+      );
+    activeUsers.add(userId);
+    try {
+      const message: ChatMessage = {
+        request_id: crypto.randomUUID(),
+        chat_id: chatId,
+        question,
+        answer: null,
+        status: 'pending',
+        error_code: null,
+        created_at: new Date().toISOString(),
+        finished_at: null,
+      };
+      chat.messages.push(message);
+      // 중단된 브라우저 요청도 서버 처리와 마찬가지로 기록의 완료까지 진행한다.
+      await delay(800);
+      message.finished_at = new Date().toISOString();
+      message.status = 'completed';
+      message.answer =
+        question.includes('\n') || question.length > 200
+          ? '긴 이야기도 잘 읽었어요. 꽥!\n\n한 가지씩 천천히 이야기해 봐요. 오늘 가장 마음에 남은 일은 무엇인가요?\n\n' +
+            '작은 이야기부터 시작해도 괜찮아요. 꽥꽥이가 함께할게요. '.repeat(12)
+          : '이야기해 줘서 고마워요. 꽥! 오늘은 어떤 기분인가요? 꽥꽥이가 함께 이야기할게요.';
+      return HttpResponse.json(message, { status: 201 });
+    } finally {
+      activeUsers.delete(userId);
+    }
   }),
   http.get(`${API_BASE_URL}/api/v1/auth/me`, async ({ request }) => {
     const unauthorized = authenticationError(request);
